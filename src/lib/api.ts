@@ -13,7 +13,7 @@ interface StoredUser extends User {
   password?: string;
 }
 
-const rawApiUrl = (import.meta.env.VITE_API_URL || '').trim();
+const PROD_BACKEND_URL = 'https://backend-studyandscroll.onrender.com';
 const isBrowser = typeof window !== 'undefined';
 const isLocalhostHost =
   isBrowser &&
@@ -21,11 +21,25 @@ const isLocalhostHost =
     window.location.hostname === '127.0.0.1' ||
     window.location.hostname === '0.0.0.0');
 
-// In production on static hosts like Vercel, if VITE_API_URL is unset, empty, or mistakenly points to localhost,
-// default directly to the internal client-side engine to avoid failing fetch calls.
-let isFallbackActive =
-  !isLocalhostHost &&
-  (!rawApiUrl || rawApiUrl.includes('localhost') || rawApiUrl.includes('127.0.0.1'));
+export function resolveApiBase(): string {
+  const envUrl = (import.meta.env.VITE_API_URL || '').trim();
+  // Extract https?:// URL if present (safeguards against terminal logs pasted into Vercel env var)
+  const extracted = envUrl.match(/https?:\/\/[^\s"'`\r\n]+/);
+  if (extracted) {
+    const url = extracted[0].replace(/\/$/, '');
+    if (!isLocalhostHost && (url.includes('localhost') || url.includes('127.0.0.1'))) {
+      return PROD_BACKEND_URL;
+    }
+    return url;
+  }
+  // In production (not localhost), default to the live Render backend
+  if (!isLocalhostHost) {
+    return PROD_BACKEND_URL;
+  }
+  return 'http://localhost:8000';
+}
+
+let isFallbackActive = false;
 
 let inMemoryToken: string | null =
   isBrowser && typeof sessionStorage !== 'undefined'
@@ -69,7 +83,7 @@ export function getAvatarUrl(path?: string | null): string {
   ) {
     return path;
   }
-  const base = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
+  const base = resolveApiBase();
   return `${base}${path.startsWith('/') ? '' : '/'}${path}`;
 }
 
@@ -1079,7 +1093,7 @@ export async function apiFetch<T>(
     return handleFallback<T>(endpoint, options);
   }
 
-  const base = rawApiUrl || (isLocalhostHost ? 'http://localhost:8000' : '');
+  const base = resolveApiBase();
   const url = `${base}${endpoint}`;
 
   const headers = new Headers(options.headers || {});
@@ -1099,7 +1113,7 @@ export async function apiFetch<T>(
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
 
     const response = await fetch(url, {
       ...options,
