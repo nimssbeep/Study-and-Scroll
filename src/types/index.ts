@@ -25,11 +25,13 @@ export interface AuthResponse {
 }
 
 export interface PostComment {
-  id: number;
+  id: number | string;
   author_name: string;
   author_handle: string;
   content: string;
   created_at: string;
+  is_ai?: boolean;
+  persona_id?: string;
 }
 
 export interface FeedPost {
@@ -38,6 +40,7 @@ export interface FeedPost {
   author_name?: string | null;
   author_handle?: string | null;
   persona: string;
+  persona_id?: string;
   post_type: 'concept' | 'quiz';
   subject: string;
   education_level: string;
@@ -57,6 +60,7 @@ export interface FeedPost {
   source_excerpt: string;
   likes_count: number;
   shares_count: number;
+  comments_count?: number;
   liked_by_me: boolean;
   saved_by_me: boolean;
   comments: PostComment[];

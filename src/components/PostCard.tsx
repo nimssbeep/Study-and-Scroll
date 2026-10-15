@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Heart, MessageCircle, Send, Bookmark, ShieldCheck, CheckCircle2, Trash2
 } from 'lucide-react';
-import type { FeedPost } from '../types';
+import type { FeedPost, PostComment } from '../types';
+import { addComment } from '../lib/api';
 
 interface Props {
   post: FeedPost;
@@ -32,12 +33,36 @@ export const PostCard: React.FC<Props> = ({
   const isQuiz = post.post_type === 'quiz';
   const [selectedOption, setSelectedOption] = useState<number | undefined>(undefined);
   const [commentText, setCommentText] = useState('');
+  const [comments, setComments] = useState<PostComment[]>(post.comments || []);
+  const [isSubmittingComment, setIsSubmittingComment] = useState(false);
 
-  const handleCommentSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    if (post.comments) {
+      setComments(post.comments);
+    }
+  }, [post.comments]);
+
+  const handleCommentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (commentText.trim()) {
-      onAddComment(post.id, commentText);
-      setCommentText('');
+    const text = commentText.trim();
+    if (!text || isSubmittingComment) return;
+
+    setCommentText('');
+    setIsSubmittingComment(true);
+
+    onAddComment(post.id, text);
+
+    try {
+      const updated = await addComment(post.id, text, post);
+      if (updated && updated.length > 0) {
+        setComments(updated);
+        post.comments = updated;
+        post.comments_count = updated.length;
+      }
+    } catch (err) {
+      console.warn('Failed to add comment with AI persona reply:', err);
+    } finally {
+      setIsSubmittingComment(false);
     }
   };
 
@@ -183,7 +208,7 @@ export const PostCard: React.FC<Props> = ({
           </button>
           <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
             <MessageCircle className="w-5 h-5" />
-            <span>{post.comments.length}</span>
+            <span>{comments.length}</span>
           </div>
           <button
             onClick={() => onShare(post)}
@@ -233,7 +258,7 @@ export const PostCard: React.FC<Props> = ({
           >
             <ShieldCheck className="w-3.5 h-3.5" />
             <span>
-              Source verified ({Math.round(post.grounding_score * 100)}%) →
+              Source verified ({post.grounding_score > 1 ? Math.round(post.grounding_score) : Math.round(post.grounding_score * 100)}%) →
             </span>
           </div>
         )}
@@ -241,10 +266,17 @@ export const PostCard: React.FC<Props> = ({
 
       {/* Comments List & Input */}
       <div className="mt-4 pt-3 border-t border-slate-200/60 space-y-2">
-        {post.comments.map((c) => (
-          <div key={c.id} className="text-xs">
-            <strong className="text-slate-900 mr-1.5">{c.author_handle}</strong>
-            <span className="text-slate-700">{c.content}</span>
+        {comments.map((c) => (
+          <div key={c.id} className="text-xs flex items-start gap-1.5">
+            <strong className="text-slate-900 shrink-0">
+              {c.author_handle || c.author_name}
+            </strong>
+            {c.is_ai && (
+              <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-purple-100 text-[#534092] shrink-0">
+                AI
+              </span>
+            )}
+            <span className="text-slate-700 leading-snug">{c.content}</span>
           </div>
         ))}
 
@@ -254,17 +286,19 @@ export const PostCard: React.FC<Props> = ({
             value={commentText}
             onChange={(e) => setCommentText(e.target.value)}
             placeholder="Add a study comment..."
+            disabled={isSubmittingComment}
             className="flex-1 bg-white/90 px-3 py-1.5 rounded-xl text-xs border border-slate-200 focus:outline-none"
           />
           <button
             type="submit"
-            disabled={!commentText.trim()}
+            disabled={!commentText.trim() || isSubmittingComment}
             className="px-3 py-1.5 rounded-xl bg-[#1C1B22] text-white text-xs font-semibold disabled:opacity-50"
           >
-            Post
+            {isSubmittingComment ? 'Replying...' : 'Post'}
           </button>
         </form>
       </div>
     </article>
   );
 };
+
