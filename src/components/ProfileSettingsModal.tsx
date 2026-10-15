@@ -14,6 +14,10 @@ import {
   getActiveGeminiKey,
   setActiveGeminiKey,
   testGeminiApiKey,
+  getUserCustomGeminiKey,
+  setUserCustomGeminiKey,
+  hasSystemGeminiKey,
+  getCachedAiTestResult,
   AI_PERSONAS,
 } from '../lib/aiPersonaEngine';
 
@@ -93,9 +97,9 @@ export const ProfileSettingsModal: React.FC<Props> = ({ user, onClose, onSuccess
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
 
-  // Gemini AI Settings state
-  const [geminiKey, setGeminiKey] = useState<string>(() => getActiveGeminiKey());
-  const [showGeminiKey, setShowGeminiKey] = useState(false);
+  // Gemini AI Settings state (protects system key from being exposed)
+  const [customKey, setCustomKey] = useState<string>(() => getUserCustomGeminiKey());
+  const [showCustomKey, setShowCustomKey] = useState(false);
   const [isTestingApi, setIsTestingApi] = useState(false);
   const [testResult, setTestResult] = useState<{
     success: boolean;
@@ -103,15 +107,15 @@ export const ProfileSettingsModal: React.FC<Props> = ({ user, onClose, onSuccess
     latencyMs?: number;
     sampleReply?: string;
     modelUsed?: string;
-  } | null>(null);
+  } | null>(() => getCachedAiTestResult());
   const [apiSaveStatus, setApiSaveStatus] = useState<string | null>(null);
 
   const handleTestApi = async () => {
     setIsTestingApi(true);
-    setTestResult(null);
     setApiSaveStatus(null);
     try {
-      const res = await testGeminiApiKey(geminiKey);
+      const keyToTest = customKey.trim() || undefined;
+      const res = await testGeminiApiKey(keyToTest);
       setTestResult(res);
     } catch (err: any) {
       setTestResult({
@@ -124,17 +128,21 @@ export const ProfileSettingsModal: React.FC<Props> = ({ user, onClose, onSuccess
   };
 
   const handleSaveApiKey = () => {
-    setActiveGeminiKey(geminiKey);
-    setApiSaveStatus('Gemini API key saved! Live AI feeds and persona replies are now active.');
-    onSuccessToast?.('Gemini API key saved successfully!');
+    setUserCustomGeminiKey(customKey);
+    setApiSaveStatus(
+      customKey.trim()
+        ? 'Personal Gemini API key saved! Live AI feeds and persona replies are now using your personal key.'
+        : 'Active with secure pre-configured system key (Gemini 3 Flash).'
+    );
+    onSuccessToast?.(customKey.trim() ? 'Personal API key saved!' : 'Using system key');
   };
 
   const handleClearApiKey = () => {
-    setActiveGeminiKey('');
-    setGeminiKey('');
+    setUserCustomGeminiKey('');
+    setCustomKey('');
     setTestResult(null);
-    setApiSaveStatus('API key removed. Reverted to offline curriculum synthesizer.');
-    onSuccessToast?.('Gemini API key removed');
+    setApiSaveStatus('Reset to pre-configured system key (Gemini 3 Flash).');
+    onSuccessToast?.('Reset to system key');
   };
 
   // Profile Save Mutation
@@ -886,20 +894,21 @@ export const ProfileSettingsModal: React.FC<Props> = ({ user, onClose, onSuccess
                     <h4 className="text-sm font-extrabold text-slate-900">
                       Google Gemini 3 Flash Engine
                     </h4>
-                    {geminiKey ? (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                        Live AI Connected (Gemini 3 Flash)
+                    {customKey ? (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800">
+                        <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                        Custom Personal Key Active
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
-                        Offline Fallback Synthesizer
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        System Key Active (Gemini 3 Flash)
                       </span>
                     )}
                   </div>
                   <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                    Powered by Google Gemini 3 Flash. Default API key is pre-installed from environment. 
-                    Click "Test API Connection" below to ping the AI and verify live status.
+                    Powered by Google Gemini 3 Flash. The system is securely pre-configured in the environment. 
+                    You can test the active connection below or optionally supply a personal key override.
                   </p>
                 </div>
               </div>
@@ -912,12 +921,12 @@ export const ProfileSettingsModal: React.FC<Props> = ({ user, onClose, onSuccess
                 </div>
               )}
 
-              {/* API Key Input Section */}
+              {/* API Key Input Section (Hides secret environment key) */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                     <KeyRound className="w-3.5 h-3.5 text-[#6D5CAE]" />
-                    <span>Google Gemini 3 Flash API Key</span>
+                    <span>Personal API Key Override (Optional)</span>
                   </label>
                   <a
                     href="https://aistudio.google.com/app/apikey"
@@ -925,43 +934,53 @@ export const ProfileSettingsModal: React.FC<Props> = ({ user, onClose, onSuccess
                     rel="noopener noreferrer"
                     className="text-[11px] font-semibold text-[#6D5CAE] hover:underline flex items-center gap-1"
                   >
-                    <span>Get free API key</span>
+                    <span>Get free personal key</span>
                     <ExternalLink className="w-3 h-3" />
                   </a>
                 </div>
 
                 <div className="relative">
                   <input
-                    type={showGeminiKey ? 'text' : 'password'}
-                    value={geminiKey}
+                    type={showCustomKey ? 'text' : 'password'}
+                    value={customKey}
                     onChange={(e) => {
-                      setGeminiKey(e.target.value);
-                      setTestResult(null);
+                      setCustomKey(e.target.value);
                       setApiSaveStatus(null);
                     }}
-                    placeholder="AIzaSy... or pre-installed env key"
+                    placeholder="•••••••••••••••••••••••••••••••• (Secure System Key Active)"
                     className="w-full pr-10 pl-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-[#6D5CAE]/20 focus:border-[#6D5CAE] text-xs font-mono"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowGeminiKey(!showGeminiKey)}
-                    className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 transition"
-                  >
-                    {showGeminiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+                  {customKey && (
+                    <button
+                      type="button"
+                      onClick={() => setShowCustomKey(!showCustomKey)}
+                      className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 transition"
+                    >
+                      {showCustomKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  )}
                 </div>
 
-                <p className="text-[11px] text-slate-400 leading-normal">
-                  Pre-installed by default from .env. Stored securely and can be tested with the button below.
+                <p className="text-[11px] text-slate-500 leading-normal">
+                  {customKey ? (
+                    <span className="text-purple-700 font-semibold">
+                      Using your custom personal Google AI Studio key.
+                    </span>
+                  ) : (
+                    <span className="text-emerald-700 font-medium flex items-center gap-1">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      Secure pre-configured environment key is active. Secret is protected and not displayed.
+                    </span>
+                  )}
                 </p>
               </div>
 
-              {/* Action Buttons: Test Connection & Save */}
+              {/* Action Buttons: Ping / Test Connection & Save */}
               <div className="flex items-center gap-2.5 flex-wrap">
                 <button
                   type="button"
                   onClick={handleTestApi}
-                  disabled={isTestingApi || !geminiKey.trim()}
+                  disabled={isTestingApi}
                   className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold text-xs flex items-center gap-2 transition disabled:opacity-50 shadow-sm"
                 >
                   {isTestingApi ? (
@@ -972,30 +991,32 @@ export const ProfileSettingsModal: React.FC<Props> = ({ user, onClose, onSuccess
                   ) : (
                     <>
                       <Zap className="w-3.5 h-3.5" />
-                      <span>Ping / Test API Connection</span>
+                      <span>Ping / Test AI Connection</span>
                     </>
                   )}
                 </button>
 
-                <button
-                  type="button"
-                  onClick={handleSaveApiKey}
-                  disabled={isTestingApi}
-                  className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-sm"
-                >
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Save Key</span>
-                </button>
+                {customKey && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleSaveApiKey}
+                      disabled={isTestingApi}
+                      className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-sm"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Save Personal Key</span>
+                    </button>
 
-                {geminiKey && (
-                  <button
-                    type="button"
-                    onClick={handleClearApiKey}
-                    disabled={isTestingApi}
-                    className="px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold text-xs transition ml-auto"
-                  >
-                    Clear Key
-                  </button>
+                    <button
+                      type="button"
+                      onClick={handleClearApiKey}
+                      disabled={isTestingApi}
+                      className="px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold text-xs transition ml-auto"
+                    >
+                      Reset to System Key
+                    </button>
+                  </>
                 )}
               </div>
 

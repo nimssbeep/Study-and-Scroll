@@ -404,9 +404,67 @@ export const GEMINI_FLASH_MODELS = [
 ];
 
 /**
+ * Returns any user-entered custom key stored in localStorage,
+ * or empty string if user is using the secure pre-configured system key.
+ */
+export function getUserCustomGeminiKey(): string {
+  if (typeof window !== 'undefined') {
+    const custom = localStorage.getItem('skrulla_user_custom_gemini_key');
+    if (custom && custom.trim()) return custom.trim();
+  }
+  return '';
+}
+
+/**
+ * Sets or removes the user's custom personal key override in localStorage.
+ */
+export function setUserCustomGeminiKey(key: string): void {
+  if (typeof window !== 'undefined') {
+    const trimmed = (key || '').trim();
+    if (trimmed) {
+      localStorage.setItem('skrulla_user_custom_gemini_key', trimmed);
+      localStorage.setItem('skrulla_gemini_api_key', trimmed);
+    } else {
+      localStorage.removeItem('skrulla_user_custom_gemini_key');
+      localStorage.setItem('skrulla_gemini_api_key', DEFAULT_GEMINI_API_KEY);
+    }
+  }
+}
+
+/**
+ * Checks if a secure system key is pre-configured in the environment.
+ */
+export function hasSystemGeminiKey(): boolean {
+  return Boolean(DEFAULT_GEMINI_API_KEY && DEFAULT_GEMINI_API_KEY.trim());
+}
+
+/**
+ * Retrieves the cached AI connection test result if available.
+ */
+export function getCachedAiTestResult(): {
+  success: boolean;
+  message: string;
+  latencyMs?: number;
+  sampleReply?: string;
+  modelUsed?: string;
+} | null {
+  if (typeof window !== 'undefined') {
+    try {
+      const saved = localStorage.getItem('skrulla_ai_last_test');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+  }
+  return null;
+}
+
+/**
  * Retrieves the active Gemini API key from localStorage (user custom key) or pre-installed default.
+ * Proactively ensures localStorage is initialized so background upload routines never encounter an empty key.
  */
 export function getActiveGeminiKey(): string {
+  const custom = getUserCustomGeminiKey();
+  if (custom) return custom;
+
   if (typeof window !== 'undefined') {
     const local = localStorage.getItem('skrulla_gemini_api_key');
     if (local && local.trim()) return local.trim();
@@ -417,6 +475,14 @@ export function getActiveGeminiKey(): string {
   if (envKey && typeof envKey === 'string' && envKey.trim()) {
     return envKey.trim();
   }
+
+  // Auto-seed into localStorage so other scripts/calls immediately find it
+  if (typeof window !== 'undefined' && DEFAULT_GEMINI_API_KEY) {
+    try {
+      localStorage.setItem('skrulla_gemini_api_key', DEFAULT_GEMINI_API_KEY);
+    } catch {}
+  }
+
   return DEFAULT_GEMINI_API_KEY;
 }
 
@@ -424,17 +490,12 @@ export function getActiveGeminiKey(): string {
  * Persists the user's custom Gemini API key into localStorage.
  */
 export function setActiveGeminiKey(key: string): void {
-  if (typeof window !== 'undefined') {
-    if (key && key.trim()) {
-      localStorage.setItem('skrulla_gemini_api_key', key.trim());
-    } else {
-      localStorage.removeItem('skrulla_gemini_api_key');
-    }
-  }
+  setUserCustomGeminiKey(key);
 }
 
 /**
  * Tests a Gemini API key with a live low-latency health check call to Gemini 3 Flash.
+ * Automatically saves successful result to cache for instant rendering across views.
  */
 export async function testGeminiApiKey(keyToTest?: string): Promise<{
   success: boolean;
@@ -485,13 +546,22 @@ export async function testGeminiApiKey(keyToTest?: string): Promise<{
           data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
           'API connected successfully!';
         const friendlyModelName = model.includes('3') ? 'gemini-3-flash' : model;
-        return {
+        const result = {
           success: true,
           message: `Connected to Gemini 3 Flash successfully! (${latency}ms)`,
           latencyMs: latency,
           sampleReply: text,
           modelUsed: friendlyModelName,
         };
+
+        // Cache the successful test result
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem('skrulla_ai_last_test', JSON.stringify(result));
+          } catch {}
+        }
+
+        return result;
       } else {
         const errJson = await response.json().catch(() => ({}));
         lastErr =

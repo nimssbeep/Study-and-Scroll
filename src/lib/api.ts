@@ -13,6 +13,8 @@ import {
   generateOriginalPersonaReply,
   AI_PERSONAS,
   isGarbageOrPdfBytecode,
+  getActiveGeminiKey,
+  testGeminiApiKey,
 } from './aiPersonaEngine';
 
 interface StoredUser extends User {
@@ -87,6 +89,11 @@ export function setAuthSession(token: string | null, csrf: string | null): void 
       try {
         localStorage.setItem('skrulla_token', token);
         localStorage.setItem('skrulla_csrf', csrf);
+        // Pre-arm active Gemini API key on login and trigger background verification
+        getActiveGeminiKey();
+        setTimeout(() => {
+          testGeminiApiKey().catch(() => {});
+        }, 80);
       } catch {}
     } else {
       sessionStorage.removeItem('skrulla_token');

@@ -1,8 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, Plus } from 'lucide-react';
 import { apiFetch, setAuthSession } from '../lib/api';
 import { cleanInput } from '../lib/sanitize';
+import { testGeminiApiKey } from '../lib/aiPersonaEngine';
 import { Navbar } from '../components/Navbar';
 import { SidebarLeft } from '../components/SidebarLeft';
 import { SidebarRight } from '../components/SidebarRight';
@@ -22,6 +23,17 @@ import type {
 
 export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
   const queryClient = useQueryClient();
+
+  // Auto-ping Gemini 3 Flash as soon as the user logs in / loads dashboard
+  useEffect(() => {
+    testGeminiApiKey()
+      .then((res) => {
+        if (res.success) {
+          console.log(`[Skrulla AI] Gemini 3 Flash auto-verified on login (${res.latencyMs}ms)`);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Navigation & Filtering
   const [activeNav, setActiveNav] = useState<'home' | 'explore' | 'friends' | 'saved'>('home');
