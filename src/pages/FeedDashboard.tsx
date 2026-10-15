@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   BookOpen, Home, Compass, Users, Bookmark, Plus, Zap, Bell, Search,
   Heart, MessageCircle, Send, ShieldCheck, Sparkles, LogOut, CheckCircle2, X,
-  Camera
+  Camera, UserPlus, UserCheck, Check, Clock, Share2
 } from 'lucide-react';
 import { apiFetch, setAuthSession } from '../lib/api';
 import { cleanInput, validateEducationalFile } from '../lib/sanitize';
@@ -11,7 +11,7 @@ import { formatTimeAgo } from '../lib/format';
 import { OnboardingModal } from './OnboardingModal';
 import { UserAvatar } from '../components/UserAvatar';
 import type {
-  User, FeedPost, StudyMaterialItem, StoryItem, FriendUser
+  User, FeedPost, StudyMaterialItem, StoryItem, FriendUser, NotificationItem
 } from '../types';
 
 export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
@@ -23,6 +23,21 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
   const [selectedPersona, setSelectedPersona] = useState<string | null>(null);
   const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Notifications Popover & Friends Directory States
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [friendSearchQuery, setFriendSearchQuery] = useState('');
+  const [friendFilterTab, setFriendFilterTab] = useState<'all' | 'following' | 'followers'>('all');
+
+  // Floating Toast State
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimeoutRef = useRef<any>(null);
+
+  const triggerToast = (msg: string) => {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    setToastMessage(msg);
+    toastTimeoutRef.current = setTimeout(() => setToastMessage(null), 3200);
+  };
 
   // Modals
   const [showOnboarding, setShowOnboarding] = useState(!user.onboarding_completed);
@@ -69,9 +84,29 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
     queryFn: () => apiFetch<StoryItem[]>('/api/social/stories'),
   });
 
-  const { data: friendsList = [] } = useQuery({
-    queryKey: ['friends'],
-    queryFn: () => apiFetch<FriendUser[]>('/api/social/friends'),
+  // Notifications Query (polls every 8s for live real-time feel)
+  const { data: notifications = [] } = useQuery<NotificationItem[]>({
+    queryKey: ['notifications'],
+    queryFn: () => apiFetch<NotificationItem[]>('/api/social/notifications'),
+    refetchInterval: 8000,
+  });
+  const unreadCount = notifications.filter((n) => !n.is_read).length;
+
+  // Following summary for sidebar badge
+  const { data: followingSummary = [] } = useQuery<FriendUser[]>({
+    queryKey: ['following_summary'],
+    queryFn: () => apiFetch<FriendUser[]>('/api/social/friends?filter_type=following'),
+  });
+
+  // Dynamic Friends Directory query (with live search and tab filtering)
+  const { data: friendsList = [], isLoading: loadingFriends } = useQuery<FriendUser[]>({
+    queryKey: ['friends', friendSearchQuery, friendFilterTab],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (friendSearchQuery.trim()) params.set('search', cleanInput(friendSearchQuery, 80));
+      if (friendFilterTab !== 'all') params.set('filter_type', friendFilterTab);
+      return apiFetch<FriendUser[]>(`/api/social/friends?${params.toString()}`);
+    },
   });
 
   // User Profile Picture Upload Mutations
@@ -105,7 +140,10 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
   // Feed Mutations
   const likeMutation = useMutation({
     mutationFn: (postId: number) => apiFetch(`/api/feed/${postId}/like`, { method: 'POST' }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['feed'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['feed'] });
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    },
   });
 
   const saveMutation = useMutation({
@@ -118,6 +156,21 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['feed'] }),
   });
 
+  const handleShare = async (post: FeedPost) => {
+    shareMutation.mutate(post.id);
+    const postUrl = `${window.location.origin}/feed?post=${post.id}`;
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(postUrl);
+        triggerToast(`Link copied to clipboard! Share it with your peers.`);
+      } else {
+        triggerToast(`Post shared!`);
+      }
+    } catch {
+      triggerToast(`Post shared!`);
+    }
+  };
+
   const commentMutation = useMutation({
     mutationFn: ({ postId, content }: { postId: number; content: string }) =>
       apiFetch(`/api/feed/${postId}/comments`, {
@@ -127,6 +180,7 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
     onSuccess: (_, variables) => {
       setCommentInputs((prev) => ({ ...prev, [variables.postId]: '' }));
       queryClient.invalidateQueries({ queryKey: ['feed'] });
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
     },
   });
 
@@ -136,15 +190,37 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['feed'] });
       queryClient.invalidateQueries({ queryKey: ['currentUser'] });
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
     },
   });
 
   const toggleFriendMutation = useMutation({
     mutationFn: (targetId: number) =>
-      apiFetch(`/api/social/friends/${targetId}/toggle`, { method: 'POST' }),
+      apiFetch<{ is_friend: boolean; followers_count: number }>(
+        `/api/social/friends/${targetId}/toggle`,
+        { method: 'POST' }
+      ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['friends'] });
+      queryClient.invalidateQueries({ queryKey: ['following_summary'] });
       queryClient.invalidateQueries({ queryKey: ['feed'] });
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    },
+  });
+
+  const markNotificationReadMutation = useMutation({
+    mutationFn: (notifId: number) =>
+      apiFetch(`/api/social/notifications/${notifId}/read`, { method: 'POST' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    },
+  });
+
+  const markAllNotificationsReadMutation = useMutation({
+    mutationFn: () =>
+      apiFetch('/api/social/notifications/read-all', { method: 'POST' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
     },
   });
 
@@ -172,6 +248,7 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
       queryClient.invalidateQueries({ queryKey: ['feed'] });
       queryClient.invalidateQueries({ queryKey: ['materials'] });
       queryClient.invalidateQueries({ queryKey: ['currentUser'] });
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
     },
     onError: (err: Error) => setUploadError(err.message),
   });
@@ -201,7 +278,7 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
     window.location.href = '/auth';
   };
 
-  const acceptedFriendsCount = friendsList.filter((f) => f.is_friend).length;
+  const acceptedFriendsCount = followingSummary.length;
 
   // Filter options come from API data rather than fixed lists.
   const personaOptions = [...new Set(posts.map((p) => p.persona))];
@@ -274,9 +351,131 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
             <Zap className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
             <span>{user.streak_days} day streak</span>
           </div>
-          <button className="p-2 rounded-full hover:bg-slate-100 text-slate-600">
-            <Bell className="w-4 h-4" />
-          </button>
+          {/* Interactive Notifications Popover */}
+          <div className="relative">
+            <button
+              onClick={() => setShowNotifications((prev) => !prev)}
+              className="relative p-2 rounded-full hover:bg-slate-100 text-slate-600 transition"
+              title="Notifications"
+            >
+              <Bell className="w-4 h-4" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 bg-rose-500 text-white rounded-full text-[10px] font-bold flex items-center justify-center ring-2 ring-white animate-pulse">
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
+            </button>
+
+            {showNotifications && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setShowNotifications(false)}
+                />
+
+                <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-3xl shadow-2xl border border-slate-100 z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
+                  <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-extrabold text-sm text-slate-900">Notifications</h4>
+                      {unreadCount > 0 && (
+                        <span className="px-2 py-0.5 bg-purple-100 text-[#6D5CAE] rounded-full text-[10px] font-bold">
+                          {unreadCount} new
+                        </span>
+                      )}
+                    </div>
+                    {unreadCount > 0 && (
+                      <button
+                        onClick={() => markAllNotificationsReadMutation.mutate()}
+                        disabled={markAllNotificationsReadMutation.isPending}
+                        className="text-[11px] font-semibold text-[#6D5CAE] hover:underline"
+                      >
+                        Mark all as read
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="max-h-[380px] overflow-y-auto divide-y divide-slate-50">
+                    {notifications.length === 0 ? (
+                      <div className="py-10 px-4 text-center">
+                        <div className="w-10 h-10 rounded-2xl bg-purple-50 text-[#6D5CAE] flex items-center justify-center mx-auto mb-2 font-bold">
+                          ✦
+                        </div>
+                        <p className="text-xs font-bold text-slate-700">All caught up!</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          When classmates like your notes, comment, or follow you, updates will appear here.
+                        </p>
+                      </div>
+                    ) : (
+                      notifications.map((n) => {
+                        let Icon = Sparkles;
+                        let iconBg = 'bg-purple-100 text-[#6D5CAE]';
+                        if (n.notification_type === 'like') {
+                          Icon = Heart;
+                          iconBg = 'bg-rose-100 text-rose-600';
+                        } else if (n.notification_type === 'comment') {
+                          Icon = MessageCircle;
+                          iconBg = 'bg-blue-100 text-blue-600';
+                        } else if (n.notification_type === 'follow') {
+                          Icon = Users;
+                          iconBg = 'bg-emerald-100 text-emerald-600';
+                        } else if (n.notification_type === 'material') {
+                          Icon = BookOpen;
+                          iconBg = 'bg-amber-100 text-amber-700';
+                        }
+
+                        return (
+                          <div
+                            key={n.id}
+                            onClick={() => {
+                              if (!n.is_read) markNotificationReadMutation.mutate(n.id);
+                              if (n.notification_type === 'follow') {
+                                setActiveNav('friends');
+                                setShowNotifications(false);
+                              }
+                            }}
+                            className={`p-3.5 flex items-start gap-3 hover:bg-slate-50 transition cursor-pointer ${
+                              !n.is_read ? 'bg-purple-50/40' : ''
+                            }`}
+                          >
+                            <div className="relative shrink-0">
+                              <UserAvatar
+                                name={n.actor_name || 'Study Friend'}
+                                avatarUrl={n.actor_avatar || ''}
+                                size="sm"
+                              />
+                              <span
+                                className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full ${iconBg} flex items-center justify-center ring-2 ring-white`}
+                              >
+                                <Icon className="w-2.5 h-2.5" />
+                              </span>
+                            </div>
+
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-1">
+                                <p className="text-xs font-bold text-slate-900 truncate">
+                                  {n.title}
+                                </p>
+                                <span className="text-[10px] text-slate-400 whitespace-nowrap">
+                                  {formatTimeAgo(n.created_at)}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-600 leading-snug mt-0.5 line-clamp-2">
+                                {n.message}
+                              </p>
+                            </div>
+
+                            {!n.is_read && (
+                              <span className="w-2 h-2 rounded-full bg-[#6D5CAE] shrink-0 mt-2" />
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
           <div
             onClick={() => fileInputRef.current?.click()}
             className="cursor-pointer group relative"
@@ -473,14 +672,87 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
 
           {/* Friends Directory View if 'friends' nav is active */}
           {activeNav === 'friends' ? (
-            <div className="bg-white rounded-3xl p-6 border border-slate-100 space-y-4">
-              <h2 className="text-lg font-extrabold">Study Peers &amp; Friends</h2>
-              {friendsList.length === 0 ? (
-                <div className="text-center py-10 bg-slate-50/60 rounded-2xl border border-dashed border-slate-200">
-                  <Users className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-                  <p className="text-xs font-bold text-slate-700">No other registered learners yet</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Invite classmates or create another account to test the friend network!
+            <div className="bg-white rounded-3xl p-6 border border-slate-100 space-y-6">
+              <div>
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xl font-extrabold text-slate-900">Study Peers &amp; Social Circle</h2>
+                  <span className="text-xs font-semibold px-3 py-1 rounded-full bg-purple-100 text-[#534092]">
+                    {friendsList.length} {friendsList.length === 1 ? 'Learner' : 'Learners'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  Connect with real classmates, follow curious minds, and build your study community.
+                </p>
+              </div>
+
+              {/* Search & Filter Toolbar */}
+              <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                  <input
+                    type="text"
+                    value={friendSearchQuery}
+                    onChange={(e) => setFriendSearchQuery(e.target.value)}
+                    placeholder="Search learners by name or @handle..."
+                    className="w-full pl-9 pr-9 py-2.5 rounded-2xl bg-slate-50 border border-slate-200/80 text-xs focus:outline-none focus:ring-2 focus:ring-purple-200 transition"
+                  />
+                  {friendSearchQuery && (
+                    <button
+                      onClick={() => setFriendSearchQuery('')}
+                      className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Filter Pills */}
+                <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-2xl self-start sm:self-auto">
+                  {(
+                    [
+                      { id: 'all', label: 'All Learners' },
+                      { id: 'following', label: 'Following' },
+                      { id: 'followers', label: 'Followers' },
+                    ] as const
+                  ).map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setFriendFilterTab(tab.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+                        friendFilterTab === tab.id
+                          ? 'bg-white text-slate-900 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Peers Grid */}
+              {loadingFriends ? (
+                <div className="text-center py-12 text-xs text-slate-400">
+                  Discovering study peers...
+                </div>
+              ) : friendsList.length === 0 ? (
+                <div className="text-center py-12 px-4 bg-slate-50/70 rounded-3xl border border-dashed border-slate-200">
+                  <Users className="w-9 h-9 text-[#6D5CAE]/60 mx-auto mb-2" />
+                  <h4 className="text-sm font-bold text-slate-800">
+                    {friendSearchQuery
+                      ? `No learners found matching "${friendSearchQuery}"`
+                      : friendFilterTab === 'following'
+                      ? "You aren't following anyone yet"
+                      : friendFilterTab === 'followers'
+                      ? 'No followers yet'
+                      : 'No other registered learners yet'}
+                  </h4>
+                  <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                    {friendSearchQuery
+                      ? 'Try searching by a different name or handle.'
+                      : friendFilterTab === 'following'
+                      ? "Explore 'All Learners' above to follow classmates and see their notes in your Following feed!"
+                      : 'Invite friends to register, or create another account to build your study network.'}
                   </p>
                 </div>
               ) : (
@@ -488,28 +760,70 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
                   {friendsList.map((peer) => (
                     <div
                       key={peer.id}
-                      className="p-4 rounded-2xl border border-slate-100 flex items-center justify-between"
+                      className="p-4 rounded-3xl border border-slate-100 bg-white hover:border-purple-200/80 hover:shadow-sm transition flex flex-col justify-between gap-3"
                     >
-                      <div className="flex items-center gap-3">
-                        <UserAvatar name={peer.name} avatarUrl={peer.avatar_url} size="md" />
-                        <div>
-                          <p className="text-xs font-bold text-slate-900">{peer.name}</p>
-                          <p className="text-[11px] text-slate-400">{peer.handle}</p>
-                          <p className="text-[10px] text-[#6D5CAE] mt-0.5">
-                            {(peer.preferences || []).join(' • ') || peer.education_level}
-                          </p>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <UserAvatar
+                            name={peer.name}
+                            avatarUrl={peer.avatar_url}
+                            size="md"
+                            className="ring-2 ring-purple-100 shrink-0"
+                          />
+                          <div className="min-w-0">
+                            <h4 className="text-xs font-bold text-slate-900 truncate">
+                              {peer.name}
+                            </h4>
+                            <p className="text-[11px] text-slate-400 truncate">
+                              @{peer.handle.replace(/^@/, '')}
+                            </p>
+                            <span className="inline-block mt-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                              {peer.education_level}
+                            </span>
+                          </div>
                         </div>
+
+                        {/* Follow / Unfollow Button */}
+                        <button
+                          onClick={() => toggleFriendMutation.mutate(peer.id)}
+                          disabled={toggleFriendMutation.isPending}
+                          className={`shrink-0 px-3.5 py-1.5 rounded-full text-xs font-semibold transition group ${
+                            peer.is_friend
+                              ? 'bg-purple-50 text-[#534092] hover:bg-rose-50 hover:text-rose-600 border border-purple-200'
+                              : 'bg-[#1C1B22] text-white hover:bg-slate-800'
+                          }`}
+                        >
+                          {peer.is_friend ? (
+                            <>
+                              <span className="group-hover:hidden flex items-center gap-1.5">
+                                <UserCheck className="w-3.5 h-3.5" /> Following
+                              </span>
+                              <span className="hidden group-hover:inline">Unfollow</span>
+                            </>
+                          ) : (
+                            <span className="flex items-center gap-1.5">
+                              <UserPlus className="w-3.5 h-3.5" /> Follow
+                            </span>
+                          )}
+                        </button>
                       </div>
-                      <button
-                        onClick={() => toggleFriendMutation.mutate(peer.id)}
-                        className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition ${
-                          peer.is_friend
-                            ? 'bg-slate-100 text-slate-700'
-                            : 'bg-[#1C1B22] text-white'
-                        }`}
-                      >
-                        {peer.is_friend ? 'Friends ✓' : 'Add Friend'}
-                      </button>
+
+                      {/* Bio / Subjects & Follower count */}
+                      <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                        <div className="flex flex-wrap gap-1">
+                          {(peer.preferences || []).slice(0, 2).map((pref) => (
+                            <span
+                              key={pref}
+                              className="px-2 py-0.5 rounded-md bg-purple-50 text-[#6D5CAE] font-medium text-[10px]"
+                            >
+                              {pref}
+                            </span>
+                          ))}
+                        </div>
+                        <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap">
+                          {peer.followers_count || 0} {peer.followers_count === 1 ? 'follower' : 'followers'}
+                        </span>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -741,8 +1055,9 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
                               <span>{post.comments.length}</span>
                             </button>
                             <button
-                              onClick={() => shareMutation.mutate(post.id)}
-                              className="flex items-center gap-1.5 text-xs font-semibold hover:text-slate-900"
+                              onClick={() => handleShare(post)}
+                              className="flex items-center gap-1.5 text-xs font-semibold hover:text-slate-900 transition"
+                              title="Share this study card"
                             >
                               <Send className="w-5 h-5" />
                               <span>{post.shares_count}</span>
@@ -1184,6 +1499,20 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
               Skrulla Study Story • {formatTimeAgo(activeStory.created_at)}
             </p>
           </div>
+        </div>
+      )}
+
+      {/* Floating Interactive Toast */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 bg-[#1C1B22] text-white px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 text-xs font-semibold border border-white/10 animate-in fade-in slide-in-from-bottom-4 duration-200">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{toastMessage}</span>
+          <button
+            onClick={() => setToastMessage(null)}
+            className="text-slate-400 hover:text-white transition ml-1"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
     </div>

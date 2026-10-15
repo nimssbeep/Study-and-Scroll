@@ -85,4 +85,21 @@ export interface FriendUser {
   education_level: string;
   preferences: string[];
   is_friend: boolean;
+  followers_count?: number;
+  following_count?: number;
+}
+
+export interface NotificationItem {
+  id: number;
+  user_id: number;
+  actor_id?: number | null;
+  actor_name?: string | null;
+  actor_handle?: string | null;
+  actor_avatar?: string | null;
+  notification_type: 'like' | 'comment' | 'follow' | 'quiz' | 'material' | string;
+  title: string;
+  message: string;
+  link?: string | null;
+  is_read: boolean;
+  created_at: string;
 }
