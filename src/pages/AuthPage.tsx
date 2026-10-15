@@ -121,7 +121,7 @@ export const AuthPage: React.FC = () => {
             <Users className="w-4 h-4" />
           </div>
           <div>
-            <p className="font-semibold text-slate-800">Good minds. Great company.</p>
+            <p className="font-semibold text-slate-800">Learn on your terms.</p>
             <p className="text-slate-500 text-[11px]">Your learning era starts here.</p>
           </div>
         </div>
