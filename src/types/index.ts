@@ -6,8 +6,13 @@ export interface User {
   handle: string;
   email: string;
   avatar_url: string;
+  bio?: string;
+  birthday?: string;
+  school?: string;
   education_level: EducationLevel;
   preferences: string[];
+  certifications?: string[];
+  social_links?: Record<string, string>;
   onboarding_completed: boolean;
   streak_days: number;
   cards_learned_this_week: number;
@@ -84,8 +89,12 @@ export interface FriendUser {
   name: string;
   handle: string;
   avatar_url: string;
+  bio?: string;
+  school?: string;
   education_level: string;
   preferences: string[];
+  certifications?: string[];
+  social_links?: Record<string, string>;
   is_friend: boolean;
   followers_count?: number;
   following_count?: number;

@@ -3,16 +3,32 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   BookOpen, Home, Compass, Users, Bookmark, Plus, Zap, Bell, Search,
   Heart, MessageCircle, Send, ShieldCheck, Sparkles, LogOut, CheckCircle2, X,
-  Camera, UserPlus, UserCheck, Check, Clock, Share2, Trash2, Archive
+  Camera, UserPlus, UserCheck, Check, Clock, Share2, Trash2, Archive,
+  Settings, GraduationCap, Calendar, Award, Globe, Github, Linkedin, Twitter, Instagram
 } from 'lucide-react';
 import { apiFetch, setAuthSession } from '../lib/api';
 import { cleanInput, validateEducationalFile } from '../lib/sanitize';
 import { formatTimeAgo } from '../lib/format';
 import { OnboardingModal } from './OnboardingModal';
+import { ProfileSettingsModal } from '../components/ProfileSettingsModal';
 import { UserAvatar } from '../components/UserAvatar';
 import type {
   User, FeedPost, StudyMaterialItem, StoryItem, FriendUser, NotificationItem
 } from '../types';
+
+function getSocialUrl(type: string, val: string): string {
+  if (!val) return '';
+  if (val.startsWith('http://') || val.startsWith('https://')) return val;
+  const cleanVal = val.replace(/^@/, '');
+  switch (type) {
+    case 'github': return `https://github.com/${cleanVal}`;
+    case 'linkedin': return val.includes('linkedin.com') ? `https://${val}` : `https://linkedin.com/in/${cleanVal}`;
+    case 'twitter': return `https://x.com/${cleanVal}`;
+    case 'instagram': return `https://instagram.com/${cleanVal}`;
+    case 'website': return `https://${val}`;
+    default: return `https://${val}`;
+  }
+}
 
 function formatRemainingTime(expiresAt?: string): string {
   if (!expiresAt) return '24h story';
@@ -58,6 +74,7 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showStoryModal, setShowStoryModal] = useState(false);
   const [showArchiveModal, setShowArchiveModal] = useState(false);
+  const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [activeStory, setActiveStory] = useState<StoryItem | null>(null);
 
   // Quiz answer state: { [postId]: selectedOptionIndex }
@@ -346,6 +363,14 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
         />
       )}
 
+      {showProfileSettings && (
+        <ProfileSettingsModal
+          user={user}
+          onClose={() => setShowProfileSettings(false)}
+          onSuccessToast={triggerToast}
+        />
+      )}
+
       <datalist id="subject-options">
         {subjectOptions.map((s) => (
           <option key={s} value={s} />
@@ -522,13 +547,13 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
             )}
           </div>
           <div
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => setShowProfileSettings(true)}
             className="cursor-pointer group relative"
-            title="Click to upload profile picture"
+            title="Edit Profile & Settings"
           >
             <UserAvatar name={user.name} avatarUrl={user.avatar_url} size="sm" className="ring-2 ring-purple-200" />
             <div className="absolute inset-0 bg-black/40 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
-              <Camera className="w-3 h-3 text-white" />
+              <Settings className="w-3 h-3 text-white" />
             </div>
           </div>
         </div>
@@ -539,8 +564,12 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
         {/* LEFT SIDEBAR */}
         <aside className="lg:col-span-3 space-y-6">
           <div className="bg-white rounded-3xl p-5 border border-slate-100 text-center">
-            {/* Interactive Profile Picture with Upload Button */}
-            <div className="relative inline-block group">
+            {/* Interactive Profile Picture with Settings Trigger */}
+            <div
+              className="relative inline-block group cursor-pointer"
+              onClick={() => setShowProfileSettings(true)}
+              title="Click to edit profile or change avatar"
+            >
               <UserAvatar
                 name={user.name}
                 avatarUrl={user.avatar_url}
@@ -549,36 +578,136 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
               />
               <button
                 type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={avatarMutation.isPending}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowProfileSettings(true);
+                }}
                 className="absolute bottom-0 right-0 p-1.5 rounded-full bg-[#6D5CAE] text-white hover:bg-[#59469B] shadow-md ring-2 ring-white transition"
-                title="Upload custom profile picture"
+                title="Profile Settings"
               >
                 <Camera className="w-3.5 h-3.5" />
               </button>
             </div>
 
-            {avatarMutation.isPending && (
-              <p className="text-[11px] text-[#6D5CAE] font-semibold mt-1">Uploading photo...</p>
-            )}
-
-            {user.avatar_url && !avatarMutation.isPending && (
-              <button
-                type="button"
-                onClick={() => removeAvatarMutation.mutate()}
-                className="block mx-auto mt-1 text-[10px] text-slate-400 hover:text-rose-600 transition"
-              >
-                Remove photo
-              </button>
-            )}
-
             <h3 className="font-bold text-slate-900 mt-2">{user.name}</h3>
-            <p className="text-xs text-slate-400">{user.handle}</p>
-            <span className="mt-2 inline-block text-[10px] font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
-              {user.education_level}
-            </span>
+            <p className="text-xs text-slate-400">@{user.handle.replace(/^@/, '')}</p>
 
-            <nav className="mt-6 space-y-1.5 text-left">
+            <div className="flex flex-wrap items-center justify-center gap-1.5 mt-2">
+              <span className="text-[10px] font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                {user.education_level}
+              </span>
+              {user.school && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-0.5 rounded-full bg-purple-50 text-[#534092] border border-purple-200/60 max-w-[170px] truncate">
+                  <GraduationCap className="w-3 h-3 shrink-0 text-[#6D5CAE]" />
+                  <span className="truncate">{user.school}</span>
+                </span>
+              )}
+            </div>
+
+            {user.birthday && (
+              <p className="text-[10px] text-slate-400 font-medium flex items-center justify-center gap-1 mt-1.5">
+                <Calendar className="w-3 h-3 text-[#6D5CAE]" />
+                <span>Born {user.birthday}</span>
+              </p>
+            )}
+
+            {user.bio && (
+              <p className="text-[11px] text-slate-600 italic mt-2.5 line-clamp-2 px-1">
+                "{user.bio}"
+              </p>
+            )}
+
+            {/* User Certifications Badges */}
+            {user.certifications && user.certifications.length > 0 && (
+              <div className="flex flex-wrap items-center justify-center gap-1 mt-2.5">
+                {user.certifications.slice(0, 3).map((cert, idx) => (
+                  <span
+                    key={idx}
+                    className="text-[9px] font-bold px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200/60 flex items-center gap-1"
+                    title={cert}
+                  >
+                    <Award className="w-2.5 h-2.5 text-amber-600" />
+                    <span className="truncate max-w-[110px]">{cert}</span>
+                  </span>
+                ))}
+                {user.certifications.length > 3 && (
+                  <span className="text-[9px] text-slate-400 font-bold">
+                    +{user.certifications.length - 3}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Social Media Links */}
+            {user.social_links && Object.keys(user.social_links).some((k) => !!user.social_links?.[k]) && (
+              <div className="flex items-center justify-center gap-2 mt-3 pt-2.5 border-t border-slate-100">
+                {user.social_links.github && (
+                  <a
+                    href={getSocialUrl('github', user.social_links.github)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+                    title="GitHub"
+                  >
+                    <Github className="w-3.5 h-3.5" />
+                  </a>
+                )}
+                {user.social_links.linkedin && (
+                  <a
+                    href={getSocialUrl('linkedin', user.social_links.linkedin)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-1.5 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-700 transition"
+                    title="LinkedIn"
+                  >
+                    <Linkedin className="w-3.5 h-3.5" />
+                  </a>
+                )}
+                {user.social_links.twitter && (
+                  <a
+                    href={getSocialUrl('twitter', user.social_links.twitter)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-900 transition"
+                    title="Twitter / X"
+                  >
+                    <Twitter className="w-3.5 h-3.5" />
+                  </a>
+                )}
+                {user.social_links.instagram && (
+                  <a
+                    href={getSocialUrl('instagram', user.social_links.instagram)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 transition"
+                    title="Instagram"
+                  >
+                    <Instagram className="w-3.5 h-3.5" />
+                  </a>
+                )}
+                {user.social_links.website && (
+                  <a
+                    href={getSocialUrl('website', user.social_links.website)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition"
+                    title="Portfolio / Website"
+                  >
+                    <Globe className="w-3.5 h-3.5" />
+                  </a>
+                )}
+              </div>
+            )}
+
+            {/* Quick Profile Settings Action */}
+            <button
+              onClick={() => setShowProfileSettings(true)}
+              className="mt-3.5 w-full py-2 px-3 rounded-2xl border border-purple-200 hover:border-[#6D5CAE] bg-purple-50/50 hover:bg-purple-100/70 text-[#534092] font-bold text-xs flex items-center justify-center gap-1.5 transition shadow-sm"
+            >
+              <Settings className="w-3.5 h-3.5 text-[#6D5CAE]" /> Edit Profile &amp; Settings
+            </button>
+
+            <nav className="mt-5 space-y-1.5 text-left">
               {[
                 { id: 'home', label: 'Home', icon: Home },
                 { id: 'explore', label: 'Explore', icon: Compass },
@@ -636,10 +765,16 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
 
           <div className="bg-white rounded-3xl p-4 border border-slate-100 flex items-center justify-between">
             <button
-              onClick={() => setShowOnboarding(true)}
-              className="text-xs font-semibold text-slate-600 hover:text-slate-900"
+              onClick={() => setShowProfileSettings(true)}
+              className="text-xs font-semibold text-slate-600 hover:text-slate-900 flex items-center gap-1.5"
             >
-              ⚙️ Preferences
+              <Settings className="w-3.5 h-3.5 text-[#6D5CAE]" /> Settings
+            </button>
+            <button
+              onClick={() => setShowOnboarding(true)}
+              className="text-xs font-semibold text-slate-500 hover:text-slate-800"
+            >
+              Topics
             </button>
             <button
               onClick={handleLogout}
@@ -822,9 +957,17 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
                             <p className="text-[11px] text-slate-400 truncate">
                               @{peer.handle.replace(/^@/, '')}
                             </p>
-                            <span className="inline-block mt-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
-                              {peer.education_level}
-                            </span>
+                            <div className="flex flex-wrap items-center gap-1 mt-1">
+                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                                {peer.education_level}
+                              </span>
+                              {peer.school && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-50 text-[#534092] border border-purple-200/60 max-w-[130px] truncate">
+                                  <GraduationCap className="w-3 h-3 text-[#6D5CAE] shrink-0" />
+                                  <span className="truncate">{peer.school}</span>
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
 
@@ -853,10 +996,94 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
                         </button>
                       </div>
 
-                      {/* Bio / Subjects & Follower count */}
-                      <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                      {/* Peer Bio (if provided) */}
+                      {peer.bio && (
+                        <p className="text-[11px] text-slate-600 italic line-clamp-2 px-0.5">
+                          "{peer.bio}"
+                        </p>
+                      )}
+
+                      {/* Peer Certifications */}
+                      {peer.certifications && peer.certifications.length > 0 && (
                         <div className="flex flex-wrap gap-1">
-                          {(peer.preferences || []).slice(0, 2).map((pref) => (
+                          {peer.certifications.slice(0, 2).map((cert, idx) => (
+                            <span
+                              key={idx}
+                              className="text-[9px] font-semibold px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200/60 flex items-center gap-1"
+                              title={cert}
+                            >
+                              <Award className="w-2.5 h-2.5 text-amber-600" />
+                              <span className="truncate max-w-[120px]">{cert}</span>
+                            </span>
+                          ))}
+                          {peer.certifications.length > 2 && (
+                            <span className="text-[9px] text-slate-400 font-bold">
+                              +{peer.certifications.length - 2} more
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Card Footer: Social links & Followers count */}
+                      <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                        <div className="flex items-center gap-1.5">
+                          {peer.social_links?.github && (
+                            <a
+                              href={getSocialUrl('github', peer.social_links.github)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+                              title="GitHub"
+                            >
+                              <Github className="w-3 h-3" />
+                            </a>
+                          )}
+                          {peer.social_links?.linkedin && (
+                            <a
+                              href={getSocialUrl('linkedin', peer.social_links.linkedin)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1 rounded bg-sky-50 hover:bg-sky-100 text-sky-700 transition"
+                              title="LinkedIn"
+                            >
+                              <Linkedin className="w-3 h-3" />
+                            </a>
+                          )}
+                          {peer.social_links?.twitter && (
+                            <a
+                              href={getSocialUrl('twitter', peer.social_links.twitter)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-900 transition"
+                              title="Twitter / X"
+                            >
+                              <Twitter className="w-3 h-3" />
+                            </a>
+                          )}
+                          {peer.social_links?.instagram && (
+                            <a
+                              href={getSocialUrl('instagram', peer.social_links.instagram)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1 rounded bg-rose-50 hover:bg-rose-100 text-rose-600 transition"
+                              title="Instagram"
+                            >
+                              <Instagram className="w-3 h-3" />
+                            </a>
+                          )}
+                          {peer.social_links?.website && (
+                            <a
+                              href={getSocialUrl('website', peer.social_links.website)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition"
+                              title="Website"
+                            >
+                              <Globe className="w-3 h-3" />
+                            </a>
+                          )}
+
+                          {(peer.preferences || []).slice(0, 1).map((pref) => (
                             <span
                               key={pref}
                               className="px-2 py-0.5 rounded-md bg-purple-50 text-[#6D5CAE] font-medium text-[10px]"
