@@ -41,14 +41,35 @@ export function resolveApiBase(): string {
 
 let isFallbackActive = false;
 
+// Clear any stale mock fallback session tokens from previous client-side demo runs
+if (isBrowser) {
+  try {
+    const savedToken = localStorage.getItem('skrulla_token');
+    if (savedToken && savedToken.startsWith('skrulla_jwt_')) {
+      localStorage.removeItem('skrulla_token');
+      localStorage.removeItem('skrulla_csrf');
+      localStorage.removeItem('skrulla_active_user_id');
+      sessionStorage.removeItem('skrulla_token');
+      sessionStorage.removeItem('skrulla_csrf');
+    }
+  } catch {}
+}
+
 let inMemoryToken: string | null =
   isBrowser && typeof sessionStorage !== 'undefined'
     ? sessionStorage.getItem('skrulla_token')
     : null;
+if (inMemoryToken && inMemoryToken.startsWith('skrulla_jwt_')) {
+  inMemoryToken = null;
+}
+
 let inMemoryCsrf: string | null =
   isBrowser && typeof sessionStorage !== 'undefined'
     ? sessionStorage.getItem('skrulla_csrf')
     : null;
+if (inMemoryCsrf && inMemoryCsrf.startsWith('skrulla_csrf_')) {
+  inMemoryCsrf = null;
+}
 
 export function setAuthSession(token: string | null, csrf: string | null): void {
   inMemoryToken = token;
@@ -305,68 +326,7 @@ const SEED_STORIES: StoryItem[] = [
   },
 ];
 
-const SEED_FRIENDS: FriendUser[] = [
-  {
-    id: 401,
-    name: 'Elena Rostova',
-    handle: '@elena.med',
-    avatar_url: '',
-    bio: 'Pre-med student studying neurology, cellular metabolism, and organic chemistry.',
-    school: 'Stanford University',
-    education_level: 'University',
-    preferences: ['Biology', 'Psychology', 'Chemistry'],
-    certifications: ['CPR Certified', 'NIH Lab Safety'],
-    social_links: {},
-    is_friend: true,
-    followers_count: 184,
-    following_count: 92,
-  },
-  {
-    id: 402,
-    name: 'Maya Lin',
-    handle: '@maya.neuro',
-    avatar_url: '',
-    bio: 'Fascinated by cognitive neuroscience, habit formation, and active recall techniques.',
-    school: 'UC Berkeley',
-    education_level: 'University',
-    preferences: ['Psychology', 'Biology'],
-    certifications: [],
-    social_links: {},
-    is_friend: false,
-    followers_count: 240,
-    following_count: 115,
-  },
-  {
-    id: 403,
-    name: 'David Kim',
-    handle: '@david.physics',
-    avatar_url: '',
-    bio: 'Theoretical physics & astrophysics tutor. Passionate about quantum electrodynamics.',
-    school: 'Caltech',
-    education_level: 'University',
-    preferences: ['Physics', 'Mathematics'],
-    certifications: [],
-    social_links: {},
-    is_friend: true,
-    followers_count: 145,
-    following_count: 73,
-  },
-  {
-    id: 404,
-    name: 'Sarah Chen',
-    handle: '@sarah.cs',
-    avatar_url: '',
-    bio: 'Building compilers, optimizing memory layout, and diving into distributed systems.',
-    school: 'MIT',
-    education_level: 'University',
-    preferences: ['Computer Science', 'Mathematics'],
-    certifications: ['AWS Cloud Practitioner'],
-    social_links: {},
-    is_friend: false,
-    followers_count: 310,
-    following_count: 140,
-  },
-];
+const SEED_FRIENDS: FriendUser[] = [];
 
 function getFeedPosts(): FeedPost[] {
   const posts = getStorage<FeedPost[]>('skrulla_posts', []);
@@ -396,12 +356,25 @@ function getStories(): StoryItem[] {
 }
 
 function getFriends(): FriendUser[] {
-  const friends = getStorage<FriendUser[]>('skrulla_friends', []);
-  if (friends.length === 0) {
-    setStorage('skrulla_friends', SEED_FRIENDS);
-    return SEED_FRIENDS;
-  }
-  return friends;
+  const storedUsers = getStorage<StoredUser[]>('skrulla_users', []);
+  const activeUserId = getStorage<number | null>('skrulla_active_user_id', null);
+  return storedUsers
+    .filter((u) => u.id !== activeUserId)
+    .map((u) => ({
+      id: u.id,
+      name: u.name,
+      handle: u.handle,
+      avatar_url: u.avatar_url || '',
+      bio: u.bio || '',
+      school: u.school || '',
+      education_level: u.education_level || 'University',
+      preferences: u.preferences || [],
+      certifications: u.certifications || [],
+      social_links: u.social_links || {},
+      is_friend: false,
+      followers_count: 0,
+      following_count: 0,
+    }));
 }
 
 function getNotifications(currentUserId?: number): NotificationItem[] {
@@ -1104,10 +1077,10 @@ export async function apiFetch<T>(
   const token = inMemoryToken || (isBrowser ? localStorage.getItem('skrulla_token') : null);
   const csrf = inMemoryCsrf || (isBrowser ? localStorage.getItem('skrulla_csrf') : null);
 
-  if (token) {
+  if (token && !token.startsWith('skrulla_jwt_')) {
     headers.set('Authorization', `Bearer ${token}`);
   }
-  if (csrf) {
+  if (csrf && !csrf.startsWith('skrulla_csrf_')) {
     headers.set('X-CSRF-Token', csrf);
   }
 
@@ -1126,28 +1099,17 @@ export async function apiFetch<T>(
     const contentType = response.headers.get('content-type') || '';
     const isHtml = contentType.includes('text/html');
 
-    // Static server rejection (405 Method Not Allowed), missing backend (404/502/503/504), or SPA HTML rewrite
-    if (
-      response.status === 405 ||
-      response.status === 404 ||
-      response.status === 502 ||
-      response.status === 503 ||
-      response.status === 504 ||
-      isHtml
-    ) {
-      isFallbackActive = true;
+    // Only route to mock fallback if Vercel static host rejected a POST with 405 Method Not Allowed or returned SPA index.html
+    if (response.status === 405 || (isHtml && !url.includes('/docs'))) {
       return handleFallback<T>(endpoint, options);
     }
 
     if (!response.ok) {
-      // If the response is genuine JSON from a live backend (e.g. 400 Bad Request / 401 Unauthorized)
       let detail = 'Unexpected server error';
       try {
         const errBody = await response.json();
         detail = errBody.detail || errBody.message || detail;
       } catch {
-        // If not JSON, it is an unconfigured proxy or static error
-        isFallbackActive = true;
         return handleFallback<T>(endpoint, options);
       }
       throw new Error(detail);
@@ -1167,8 +1129,7 @@ export async function apiFetch<T>(
       throw err;
     }
 
-    // Network failure, connection refused, or timeout: activate fallback seamlessly
-    isFallbackActive = true;
+    // Network failure / timeout: fallback for this single request without permanently locking the session
     return handleFallback<T>(endpoint, options);
   }
 }
