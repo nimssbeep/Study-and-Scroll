@@ -153,8 +153,77 @@ export function getPersonaByNameOrId(identifier?: string): PersonaProfile {
 }
 
 /**
+ * Strict validator that detects raw PDF bytecode, FlateDecode streams, font mappings,
+ * and base64/JPEG thumbnail noise to prevent binary garbage from polluting study cards.
+ */
+export function isGarbageOrPdfBytecode(text: string): boolean {
+  if (!text || typeof text !== 'string') return true;
+  const cleaned = text.trim();
+  if (cleaned.length < 15) return true;
+
+  // 1. PDF dictionary keys & bytecode operators
+  if (
+    /\/(Filter|FlateDecode|ColorSpace|DeviceRGB|DeviceGray|Length|XObject|Subtype|Image|Catalog|Pages|Font|Encoding|MediaBox|Annots|ShadingType|Domain|FunctionType|DecodeParms|BitsPerComponent|Width|Height|ExtGState|FontDescriptor|Type\s*\/)\b/i.test(
+      cleaned
+    )
+  ) {
+    return true;
+  }
+
+  // 2. PDF indirect object syntax, xref, trailer
+  if (/\b\d+\s+\d+\s+(R|obj|endobj)\b/.test(cleaned) || /\b(xref|trailer|startxref)\b/i.test(cleaned)) {
+    return true;
+  }
+
+  // 3. Repeated base64 / JPEG noise like "QE QE QE" or "AAAA"
+  if (/(QE\s*){3,}|(AAAA){3,}|(IIII){3,}|(0000){4,}/i.test(cleaned)) {
+    return true;
+  }
+
+  // 4. Font tables / alphabet dumps
+  if (/CDEFGHIJKLMNOPQRSTUVWXYZ/i.test(cleaned) || /abcdefghijklmnopqrstuvwxyz/i.test(cleaned)) {
+    return true;
+  }
+
+  // 5. Excessive punctuation or symbols (e.g. %*."%()+,- /3/*2*+*C*)
+  const symbolCount = (cleaned.match(/[%*./+^=~`$#<>{}()[\]\\|&!@:;?]/g) || []).length;
+  if (symbolCount / cleaned.length > 0.16) {
+    return true;
+  }
+
+  // 6. Check common English vocabulary density
+  const words = cleaned.toLowerCase().match(/\b[a-z]{2,}\b/g) || [];
+  if (words.length < 3) return true;
+
+  const COMMON_WORDS = new Set([
+    'the', 'be', 'to', 'of', 'and', 'a', 'in', 'that', 'have', 'i', 'it', 'for', 'not',
+    'on', 'with', 'he', 'as', 'you', 'do', 'at', 'this', 'but', 'his', 'by', 'from',
+    'they', 'we', 'say', 'her', 'she', 'or', 'an', 'will', 'my', 'one', 'all', 'would',
+    'there', 'their', 'what', 'so', 'up', 'out', 'if', 'about', 'who', 'get', 'which',
+    'go', 'me', 'when', 'make', 'can', 'like', 'time', 'no', 'just', 'him', 'know',
+    'take', 'people', 'into', 'year', 'your', 'good', 'some', 'could', 'them', 'see',
+    'other', 'than', 'then', 'now', 'look', 'only', 'come', 'its', 'over', 'think',
+    'also', 'back', 'after', 'use', 'two', 'how', 'our', 'work', 'first', 'well',
+    'way', 'even', 'new', 'want', 'because', 'any', 'these', 'give', 'day', 'most',
+    'us', 'is', 'are', 'was', 'were', 'been', 'has', 'had', 'function', 'variable',
+    'system', 'concept', 'structure', 'study', 'note', 'problem', 'theory', 'model',
+    'data', 'input', 'output', 'example', 'process', 'result', 'defined', 'formula',
+    'relation', 'rule', 'mathematics', 'math', 'domain', 'range', 'value', 'graph',
+    'class', 'type', 'set', 'element', 'order', 'property', 'state', 'method', 'learn',
+    'test', 'exam', 'step', 'point', 'core', 'code', 'program', 'line', 'call', 'return'
+  ]);
+
+  const commonCount = words.filter((w) => COMMON_WORDS.has(w)).length;
+  if (commonCount / words.length < 0.18) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Extracts readable text chunks from an uploaded File or raw text input.
- * Determines how many feed cards (between 5 and 12+) to generate based on content size.
+ * Sanitizes against binary PDF streams, FlateDecode dictionaries, and bytecode garbage.
  */
 export async function extractMaterialTextAndChunks(
   file?: File | null,
@@ -163,35 +232,29 @@ export async function extractMaterialTextAndChunks(
   subject: string = 'General'
 ): Promise<{ fullText: string; chunks: string[]; targetPostCount: number }> {
   let extracted = (rawText || '').trim();
+  const cleanTitle = title.replace(/[!?;:#$%^*()_=[\]{}<>]/g, ' ').replace(/\s+/g, ' ').trim() || 'Study Notes';
+  const cleanSubject = subject.replace(/[!?;:#$%^*()_=[\]{}<>]/g, ' ').replace(/\s+/g, ' ').trim() || 'General';
 
   if (file) {
     try {
-      const textContent = await file.text();
-      // Filter out binary noise if it's a PDF/DOCX binary stream while keeping readable ASCII phrases
-      const printableRuns =
-        textContent
-          .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ')
-          .match(/[A-Za-z0-9][A-Za-z0-9\s.,;:?!()\-+*/=^%'"_]{35,}/g) || [];
-      const cleanedFromFile = printableRuns
-        .filter(
-          (segment) =>
-            !/^(obj|endobj|stream|endstream|xref|trailer|startxref|FontDescriptor|Filter|FlateDecode)/i.test(
-              segment.trim()
-            )
-        )
-        .join(' ')
-        .replace(/\s+/g, ' ')
-        .trim();
+      const isPdf =
+        file.name.toLowerCase().endsWith('.pdf') ||
+        (file.type && file.type.includes('pdf'));
 
-      if (cleanedFromFile.length > extracted.length) {
-        extracted = cleanedFromFile;
+      // If it's a plain text/markdown file, read safely
+      if (!isPdf) {
+        const textContent = await file.text();
+        const cleanContent = textContent.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ').trim();
+        if (!isGarbageOrPdfBytecode(cleanContent)) {
+          extracted = cleanContent;
+        }
       }
     } catch {
-      // Fallback to metadata-driven synthesis if binary file cannot be read as text
+      // Fallback safely to topic synthesis
     }
   }
 
-  // Calculate target post count between 5 and 12+ based on file size and text density
+  // Calculate target post count between 5 and 12+ based on content size
   const fileSizeBytes = file?.size || extracted.length * 2;
   let targetPostCount = 6;
 
@@ -204,14 +267,14 @@ export async function extractMaterialTextAndChunks(
   } else if (extracted.length > 700 || fileSizeBytes > 25_000) {
     targetPostCount = 7;
   } else {
-    targetPostCount = 6; // Minimum 5-6 guaranteed feeds per upload
+    targetPostCount = 6;
   }
 
-  // Split text into meaningful conceptual chunks
+  // Split text into meaningful conceptual chunks and filter out any sentence matching garbage
   const sentences = extracted
     .split(/(?<=[.!?])\s+|\n{2,}/)
     .map((s) => s.trim())
-    .filter((s) => s.length > 25 && s.split(/\s+/).length >= 5);
+    .filter((s) => s.length > 25 && s.split(/\s+/).length >= 5 && !isGarbageOrPdfBytecode(s));
 
   const chunks: string[] = [];
   if (sentences.length >= targetPostCount) {
@@ -219,30 +282,35 @@ export async function extractMaterialTextAndChunks(
     for (let i = 0; i < targetPostCount; i++) {
       const start = i * groupSize;
       const slice = sentences.slice(start, start + groupSize + 1).join(' ');
-      if (slice) chunks.push(slice.slice(0, 420));
+      if (slice && !isGarbageOrPdfBytecode(slice)) {
+        chunks.push(slice.slice(0, 420));
+      }
     }
   } else if (sentences.length > 0) {
     for (let i = 0; i < targetPostCount; i++) {
       chunks.push(sentences[i % sentences.length].slice(0, 420));
     }
-  } else {
-    // Rich conceptual sub-angles when a scanned/binary PDF or short title is uploaded
-    const subAngles = [
-      `Core definition, foundational axioms, and primary purpose of ${title} within ${subject}.`,
-      `Step-by-step operational mechanism and how variables interact inside ${title}.`,
-      `Common student misconceptions, edge cases, and boundary conditions in ${title}.`,
-      `Real-world applications, practical engineering/scientific use cases, and why ${title} matters.`,
-      `High-yield exam patterns, rapid problem-solving heuristics, and key formulas for ${title}.`,
-      `Comparative analysis: how ${title} connects to broader models in ${subject}.`,
-      `Historical intuition and first-principles derivation behind ${title}.`,
-      `Edge-case stress test: what happens when standard assumptions in ${title} fail?`,
-      `Memory palace and intuitive mental analogies for mastering ${title} effortlessly.`,
-      `Synthesis review: integrating all moving parts of ${title} under timed recall.`,
-      `Advanced optimization and deeper theoretical implications of ${title} in ${subject}.`,
-      `Consolidated active recall takeaways: key formulas, theorems, and definitions in ${title}.`,
+  }
+
+  // If no clean natural sentences survived, use rich curriculum-grounded conceptual angles
+  if (chunks.length < targetPostCount) {
+    const educationalAngles = [
+      `Foundational definition: In ${cleanSubject}, "${cleanTitle}" establishes the primary mapping rule where each input element corresponds to an unambiguous, well-defined output value.`,
+      `Core operational mechanism: When applying ${cleanTitle}, each transformation step must preserve invariants, respect variable bounds, and eliminate extraneous solutions.`,
+      `High-yield exam pattern: Test questions on ${cleanTitle} frequently invert premises or introduce edge cases—such as undefined intervals or zero-division—to verify conceptual retention.`,
+      `Real-world mental model: Picture ${cleanTitle} like a sealed computation module in ${cleanSubject}: provided the input parameters satisfy the domain criteria, the result is deterministic and reproducible.`,
+      `First-principles deconstruction: Stripping away arbitrary notation, ${cleanTitle} reduces down to a consistent constraint governing system states across ${cleanSubject}.`,
+      `Common student pitfall: Conflating general relations with ${cleanTitle}—a valid ${cleanTitle} must never map a single domain input to conflicting outputs.`,
+      `Edge-case boundary analysis: What happens to the behavior of ${cleanTitle} as parameters approach asymptotic limits or discontinuous transitions?`,
+      `Active recall challenge: Given the core principles of ${cleanTitle}, derive how the governing rules adapt when external system constraints shift.`,
+      `Synthesis and memory anchor: Linking the axioms of ${cleanTitle} to broader models in ${cleanSubject} allows rapid recognition under timed exam conditions.`,
+      `Intuitive system analogy: Think of ${cleanTitle} like a functions pipeline in software: clean arguments yield predictable returns without unexpected side-effects.`,
+      `Consolidated review checkpoint: Reviewing the formal properties, domain restrictions, and evaluation steps that define ${cleanTitle} in ${cleanSubject}.`,
+      `Mastery summary: Integrating all moving components of ${cleanTitle} so you can deconstruct novel examination problems with confidence.`,
     ];
-    for (let i = 0; i < targetPostCount; i++) {
-      chunks.push(subAngles[i % subAngles.length]);
+
+    while (chunks.length < targetPostCount) {
+      chunks.push(educationalAngles[chunks.length % educationalAngles.length]);
     }
   }
 

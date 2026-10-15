@@ -12,6 +12,7 @@ import {
   generateRichFeedFromMaterial,
   generateOriginalPersonaReply,
   AI_PERSONAS,
+  isGarbageOrPdfBytecode,
 } from './aiPersonaEngine';
 
 interface StoredUser extends User {
@@ -507,15 +508,26 @@ const SEED_FRIENDS: FriendUser[] = [];
 
 function getFeedPosts(): FeedPost[] {
   let posts = getStorage<FeedPost[]>('skrulla_posts', []);
-  const hasMemerScholar = posts.some(
+
+  // Filter out any corrupted posts containing PDF bytecode or binary artifacts
+  const cleanPosts = posts.filter((p) => {
+    const textToCheck = `${p.headline} ${p.body} ${p.source_excerpt || ''}`;
+    return !isGarbageOrPdfBytecode(textToCheck);
+  });
+
+  const hasMemerScholar = cleanPosts.some(
     (p) => p.persona === 'Memer Scholar' || p.persona_id === 'memer_scholar'
   );
-  if (posts.length === 0 || !hasMemerScholar) {
-    posts = [...SEED_POSTS, ...posts.filter((p) => p.id > 100)];
+  if (cleanPosts.length === 0 || !hasMemerScholar) {
+    posts = [...SEED_POSTS, ...cleanPosts.filter((p) => p.id > 100)];
     setStorage('skrulla_posts', posts);
     return posts;
   }
-  return posts;
+
+  if (cleanPosts.length !== posts.length) {
+    setStorage('skrulla_posts', cleanPosts);
+  }
+  return cleanPosts;
 }
 
 function getMaterials(): StudyMaterialItem[] {
