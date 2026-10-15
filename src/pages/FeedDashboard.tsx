@@ -6,19 +6,18 @@ import {
 } from 'lucide-react';
 import { apiFetch, setAuthSession } from '../lib/api';
 import { cleanInput, validateEducationalFile } from '../lib/sanitize';
+import { formatTimeAgo } from '../lib/format';
 import { OnboardingModal } from './OnboardingModal';
 import type {
   User, FeedPost, StudyMaterialItem, StoryItem, FriendUser
 } from '../types';
-
-const PERSONAS = ['All personas', 'The Memer', 'Thread Architect', 'Storyteller', 'Quizmaster'];
 
 export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
   const queryClient = useQueryClient();
 
   const [activeNav, setActiveNav] = useState<'home' | 'explore' | 'friends' | 'saved'>('home');
   const [feedTab, setFeedTab] = useState<'for_you' | 'following'>('for_you');
-  const [selectedPersona, setSelectedPersona] = useState('All personas');
+  const [selectedPersona, setSelectedPersona] = useState<string | null>(null);
   const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -35,22 +34,22 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
 
   // Upload form state
   const [uploadTitle, setUploadTitle] = useState('');
-  const [uploadSubject, setUploadSubject] = useState(user.preferences[0] || 'Biology');
+  const [uploadSubject, setUploadSubject] = useState(user.preferences[0] ?? '');
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   // Story form state
   const [storyTitle, setStoryTitle] = useState('');
-  const [storySubject, setStorySubject] = useState('Biology');
+  const [storySubject, setStorySubject] = useState(user.preferences[0] ?? '');
 
   // Queries via TanStack Query
   const effectiveTab = activeNav === 'saved' ? 'saved' : feedTab;
 
+  // Persona filtering happens client-side so the filter chips can be built from the fetched posts.
   const { data: posts = [], isLoading: loadingPosts } = useQuery({
-    queryKey: ['feed', effectiveTab, selectedPersona, selectedSubject, searchQuery],
+    queryKey: ['feed', effectiveTab, selectedSubject, searchQuery],
     queryFn: () => {
       const params = new URLSearchParams({ tab: effectiveTab });
-      if (selectedPersona !== 'All personas') params.set('persona', selectedPersona);
       if (selectedSubject) params.set('subject', selectedSubject);
       if (searchQuery.trim()) params.set('search', cleanInput(searchQuery, 80));
       return apiFetch<FeedPost[]>(`/api/feed?${params.toString()}`);
@@ -173,14 +172,32 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
 
   const acceptedFriendsCount = friendsList.filter((f) => f.is_friend).length;
 
+  // Filter options come from API data rather than fixed lists.
+  const personaOptions = [...new Set(posts.map((p) => p.persona))];
+  if (selectedPersona && !personaOptions.includes(selectedPersona)) {
+    personaOptions.push(selectedPersona);
+  }
+  const visiblePosts = selectedPersona
+    ? posts.filter((p) => p.persona === selectedPersona)
+    : posts;
+  const subjectOptions = [...new Set([...user.preferences, ...materials.map((m) => m.subject)])];
+
   return (
     <div className="min-h-screen bg-[#FAF9FE] text-slate-900">
       {showOnboarding && (
         <OnboardingModal
+          user={user}
+          subjectOptions={subjectOptions}
           onClose={() => setShowOnboarding(false)}
           onOpenUpload={() => setShowUploadModal(true)}
         />
       )}
+
+      <datalist id="subject-options">
+        {subjectOptions.map((s) => (
+          <option key={s} value={s} />
+        ))}
+      </datalist>
 
       {/* Top Navigation Header */}
       <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-100 px-6 py-3.5 flex items-center justify-between">
@@ -458,9 +475,9 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
 
               {/* AI Persona Filters */}
               <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                {PERSONAS.map((persona) => (
+                {[null, ...personaOptions].map((persona) => (
                   <button
-                    key={persona}
+                    key={persona ?? 'all-personas'}
                     onClick={() => setSelectedPersona(persona)}
                     className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold shrink-0 border transition ${
                       selectedPersona === persona
@@ -468,7 +485,7 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
                         : 'bg-white text-slate-600 border-slate-100 hover:bg-slate-50'
                     }`}
                   >
-                    {persona}
+                    {persona ?? 'All personas'}
                   </button>
                 ))}
               </div>
@@ -480,7 +497,7 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
                 </div>
               ) : (
                 <div className="space-y-6">
-                  {posts.map((post) => {
+                  {visiblePosts.map((post) => {
                     const isQuiz = post.post_type === 'quiz';
                     const selectedOption = quizAnswers[post.id];
 
@@ -820,26 +837,28 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
           </div>
 
           {/* A Little Rabbit Hole (Topic Filters) */}
-          <div className="bg-white rounded-3xl p-5 border border-slate-100">
-            <h3 className="text-sm font-extrabold text-slate-900 mb-3">A little rabbit hole</h3>
-            <div className="grid grid-cols-2 gap-2.5">
-              {['Biology', 'Psychology', 'Mathematics', 'Computer Science'].map((topic) => (
-                <button
-                  key={topic}
-                  onClick={() =>
-                    setSelectedSubject(selectedSubject === topic ? null : topic)
-                  }
-                  className={`p-3 rounded-2xl text-xs font-bold border transition ${
-                    selectedSubject === topic
-                      ? 'bg-[#6D5CAE] text-white border-[#6D5CAE]'
-                      : 'bg-purple-50/60 text-slate-700 border-purple-100 hover:bg-purple-100/60'
-                  }`}
-                >
-                  {topic}
-                </button>
-              ))}
+          {subjectOptions.length > 0 && (
+            <div className="bg-white rounded-3xl p-5 border border-slate-100">
+              <h3 className="text-sm font-extrabold text-slate-900 mb-3">A little rabbit hole</h3>
+              <div className="grid grid-cols-2 gap-2.5">
+                {subjectOptions.map((topic) => (
+                  <button
+                    key={topic}
+                    onClick={() =>
+                      setSelectedSubject(selectedSubject === topic ? null : topic)
+                    }
+                    className={`p-3 rounded-2xl text-xs font-bold border transition ${
+                      selectedSubject === topic
+                        ? 'bg-[#6D5CAE] text-white border-[#6D5CAE]'
+                        : 'bg-purple-50/60 text-slate-700 border-purple-100 hover:bg-purple-100/60'
+                    }`}
+                  >
+                    {topic}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Learning Pulse Card */}
           <div className="bg-[#F3EEFF] rounded-3xl p-5 border border-purple-200/60">
@@ -848,16 +867,11 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
             </p>
             <h3 className="text-lg font-extrabold text-slate-900 mt-1">Look at you grow.</h3>
             <p className="text-[11px] text-slate-500">Small moments. Real progress.</p>
-            <div className="mt-4 flex items-baseline justify-between">
-              <div>
-                <span className="text-2xl font-extrabold text-slate-900">
-                  {user.cards_learned_this_week}
-                </span>
-                <span className="text-xs text-slate-600 ml-1">cards learned this week</span>
-              </div>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-200 text-[#534092]">
-                ↗ 18%
+            <div className="mt-4">
+              <span className="text-2xl font-extrabold text-slate-900">
+                {user.cards_learned_this_week}
               </span>
+              <span className="text-xs text-slate-600 ml-1">cards learned this week</span>
             </div>
           </div>
 
@@ -938,19 +952,15 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Subject</label>
-                <select
+                <input
+                  type="text"
+                  required
+                  list="subject-options"
                   value={uploadSubject}
                   onChange={(e) => setUploadSubject(e.target.value)}
+                  placeholder="e.g., Chemistry"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs"
-                >
-                  {['Biology', 'Mathematics', 'Computer Science', 'Psychology', 'Physics', 'Chemistry', 'History'].map(
-                    (s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    )
-                  )}
-                </select>
+                />
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -1012,8 +1022,11 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
                 <label className="block text-xs font-bold text-slate-700 mb-1">Subject</label>
                 <input
                   type="text"
+                  required
+                  list="subject-options"
                   value={storySubject}
                   onChange={(e) => setStorySubject(e.target.value)}
+                  placeholder="e.g., Linear Algebra"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs"
                 />
               </div>
@@ -1064,7 +1077,9 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
               </h2>
             </div>
 
-            <p className="text-[11px] text-slate-600">Skrulla Study Story • 24h</p>
+            <p className="text-[11px] text-slate-600">
+              Skrulla Study Story • {formatTimeAgo(activeStory.created_at)}
+            </p>
           </div>
         </div>
       )}

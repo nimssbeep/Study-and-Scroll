@@ -3,8 +3,25 @@
 @tailwind utilities;
 
 @layer base {
+  /* The UI is light-only; "light dark" made browsers paint native form controls dark in OS dark mode. */
   :root {
-    color-scheme: light dark;
+    color-scheme: light;
+  }
+
+  :where(input:not([type='file']):not([type='checkbox']):not([type='radio']), textarea, select) {
+    background-color: #fbfaff;
+    color: #2e2b3d;
+    transition: border-color 0.15s, box-shadow 0.15s, background-color 0.15s;
+  }
+
+  :where(input:not([type='file']):not([type='checkbox']):not([type='radio']), textarea, select):focus {
+    background-color: #ffffff;
+    border-color: #a99bd6;
+    box-shadow: 0 0 0 3px rgba(109, 92, 174, 0.15);
+  }
+
+  :where(input, textarea)::placeholder {
+    color: #a09bb3;
   }
 
   body {

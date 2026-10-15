@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, ArrowRight, ShieldCheck, ArrowUpRight } from 'lucide-react';
+import { BookOpen, ArrowRight, ShieldCheck, ArrowUpRight, Users } from 'lucide-react';
 import { apiFetch, setAuthSession } from '../lib/api';
 import { cleanInput } from '../lib/sanitize';
 import type { AuthResponse } from '../types';
@@ -117,22 +117,8 @@ export const AuthPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3 text-xs text-slate-600">
-          <div className="flex -space-x-2">
-            <img
-              src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=80"
-              alt="Student"
-              className="w-7 h-7 rounded-full ring-2 ring-white object-cover"
-            />
-            <img
-              src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=80"
-              alt="Student"
-              className="w-7 h-7 rounded-full ring-2 ring-white object-cover"
-            />
-            <img
-              src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=80"
-              alt="Student"
-              className="w-7 h-7 rounded-full ring-2 ring-white object-cover"
-            />
+          <div className="w-9 h-9 rounded-full bg-white text-[#6D5CAE] flex items-center justify-center shadow-sm">
+            <Users className="w-4 h-4" />
           </div>
           <div>
             <p className="font-semibold text-slate-800">Good minds. Great company.</p>

@@ -2,33 +2,36 @@ import React, { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Sparkles, GraduationCap, Upload, ArrowRight } from 'lucide-react';
 import { apiFetch } from '../lib/api';
+import { cleanInput } from '../lib/sanitize';
 import type { EducationLevel, User } from '../types';
 
 interface Props {
+  user: User;
+  subjectOptions: string[];
   onClose: () => void;
   onOpenUpload: () => void;
 }
 
-const SUBJECT_OPTIONS = [
-  'Mathematics',
-  'Biology',
-  'Computer Science',
-  'Psychology',
-  'Physics',
-  'Chemistry',
-  'History',
-  'Literature',
-];
-
-export const OnboardingModal: React.FC<Props> = ({ onClose, onOpenUpload }) => {
-  const [level, setLevel] = useState<EducationLevel>('University');
-  const [selectedSubjects, setSelectedSubjects] = useState<string[]>(['Mathematics', 'Biology']);
+export const OnboardingModal: React.FC<Props> = ({ user, subjectOptions, onClose, onOpenUpload }) => {
+  const [level, setLevel] = useState<EducationLevel>(user.education_level);
+  const [selectedSubjects, setSelectedSubjects] = useState<string[]>(user.preferences);
+  const [customSubject, setCustomSubject] = useState('');
   const queryClient = useQueryClient();
+
+  const subjects = [...new Set([...subjectOptions, ...selectedSubjects])];
 
   const toggleSubject = (subject: string) => {
     setSelectedSubjects((prev) =>
       prev.includes(subject) ? prev.filter((s) => s !== subject) : [...prev, subject]
     );
+  };
+
+  const addCustomSubject = () => {
+    const subject = cleanInput(customSubject, 60);
+    if (subject && !selectedSubjects.includes(subject)) {
+      setSelectedSubjects((prev) => [...prev, subject]);
+    }
+    setCustomSubject('');
   };
 
   const prefMutation = useMutation({
@@ -94,7 +97,7 @@ export const OnboardingModal: React.FC<Props> = ({ onClose, onOpenUpload }) => {
             Pick your favorite subjects
           </label>
           <div className="flex flex-wrap gap-2">
-            {SUBJECT_OPTIONS.map((subj) => {
+            {subjects.map((subj) => {
               const active = selectedSubjects.includes(subj);
               return (
                 <button
@@ -112,6 +115,27 @@ export const OnboardingModal: React.FC<Props> = ({ onClose, onOpenUpload }) => {
               );
             })}
           </div>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              addCustomSubject();
+            }}
+            className="mt-3 flex gap-2"
+          >
+            <input
+              type="text"
+              value={customSubject}
+              onChange={(e) => setCustomSubject(e.target.value)}
+              placeholder="Add another subject..."
+              className="flex-1 px-3.5 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:border-[#6D5CAE]"
+            />
+            <button
+              type="submit"
+              className="px-3.5 py-2 rounded-xl bg-[#F4F3F8] text-slate-700 text-xs font-semibold hover:bg-purple-100"
+            >
+              Add
+            </button>
+          </form>
         </div>
 
         {/* Actions: Save or Skip straight to Uploading */}
