@@ -34,6 +34,9 @@ export interface PostComment {
 
 export interface FeedPost {
   id: number;
+  user_id?: number | null;
+  author_name?: string | null;
+  author_handle?: string | null;
   persona: string;
   post_type: 'concept' | 'quiz';
   subject: string;

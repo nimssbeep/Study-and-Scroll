@@ -1,27 +1,33 @@
 import React, { useState } from 'react';
 import {
-  Heart, MessageCircle, Send, Bookmark, ShieldCheck, CheckCircle2
+  Heart, MessageCircle, Send, Bookmark, ShieldCheck, CheckCircle2, Trash2
 } from 'lucide-react';
 import type { FeedPost } from '../types';
 
 interface Props {
   post: FeedPost;
+  currentUserId?: number;
   onLike: (postId: number) => void;
   onSave: (postId: number) => void;
   onShare: (post: FeedPost) => void;
   onGenerateQuiz: (postId: number) => void;
   isGeneratingQuiz: boolean;
   onAddComment: (postId: number, content: string) => void;
+  onDelete?: (postId: number) => void;
+  isDeleting?: boolean;
 }
 
 export const PostCard: React.FC<Props> = ({
   post,
+  currentUserId,
   onLike,
   onSave,
   onShare,
   onGenerateQuiz,
   isGeneratingQuiz,
   onAddComment,
+  onDelete,
+  isDeleting,
 }) => {
   const isQuiz = post.post_type === 'quiz';
   const [selectedOption, setSelectedOption] = useState<number | undefined>(undefined);
@@ -64,15 +70,32 @@ export const PostCard: React.FC<Props> = ({
           </div>
         </div>
 
-        {!isQuiz && (
-          <button
-            onClick={() => onGenerateQuiz(post.id)}
-            disabled={isGeneratingQuiz}
-            className="text-[11px] font-bold px-3 py-1.5 rounded-xl bg-white hover:bg-purple-50 text-[#534092] border border-purple-200 transition disabled:opacity-50"
-          >
-            {isGeneratingQuiz ? 'Generating...' : '+ Generate Quiz'}
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {!isQuiz && (
+            <button
+              onClick={() => onGenerateQuiz(post.id)}
+              disabled={isGeneratingQuiz}
+              className="text-[11px] font-bold px-3 py-1.5 rounded-xl bg-white hover:bg-purple-50 text-[#534092] border border-purple-200 transition disabled:opacity-50"
+            >
+              {isGeneratingQuiz ? 'Generating...' : '+ Generate Quiz'}
+            </button>
+          )}
+          {post.user_id && currentUserId && post.user_id === currentUserId && onDelete && (
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm('Are you sure you want to delete this study post?')) {
+                  onDelete(post.id);
+                }
+              }}
+              disabled={isDeleting}
+              className="p-1.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-white transition shadow-sm border border-transparent hover:border-rose-200"
+              title="Delete this post"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       <p className="text-xs text-slate-700 mb-3">{post.hook}</p>

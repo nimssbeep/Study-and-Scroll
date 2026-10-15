@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { BookOpen } from 'lucide-react';
+import { BookOpen, Plus } from 'lucide-react';
 import { apiFetch, setAuthSession } from '../lib/api';
 import { cleanInput } from '../lib/sanitize';
 import { Navbar } from '../components/Navbar';
@@ -12,6 +12,8 @@ import { FriendsDirectory } from '../components/FriendsDirectory';
 import { UploadMaterialModal } from '../components/UploadMaterialModal';
 import { CreateStoryModal, ViewStoryModal, StoryArchiveModal } from '../components/StoryModals';
 import { ProfileSettingsModal } from '../components/ProfileSettingsModal';
+import { CreatePostModal } from '../components/CreatePostModal';
+import { UserAvatar } from '../components/UserAvatar';
 import { OnboardingModal } from './OnboardingModal';
 import { Toast } from '../components/Toast';
 import type {
@@ -38,6 +40,7 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
   const [showStoryModal, setShowStoryModal] = useState(false);
   const [showArchiveModal, setShowArchiveModal] = useState(false);
   const [showProfileSettings, setShowProfileSettings] = useState(false);
+  const [showCreatePostModal, setShowCreatePostModal] = useState(false);
   const [activeStory, setActiveStory] = useState<StoryItem | null>(null);
 
   // Floating Toast
@@ -170,6 +173,18 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
     },
   });
 
+  const deletePostMutation = useMutation({
+    mutationFn: (postId: number) =>
+      apiFetch(`/api/feed/${postId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['feed'] });
+      triggerToast('Post deleted successfully.');
+    },
+    onError: (err: Error) => {
+      triggerToast(err.message || 'Failed to delete post.');
+    },
+  });
+
   const handleLogout = async () => {
     await apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     setAuthSession(null, null);
@@ -260,6 +275,25 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
             />
           ) : (
             <>
+              {/* Create Study Post Prompt Bar */}
+              <div className="bg-white rounded-3xl p-3 sm:p-4 border border-slate-100 flex items-center gap-3 shadow-sm hover:border-purple-200 transition">
+                <UserAvatar name={user.name} avatarUrl={user.avatar_url} size="sm" className="shrink-0 ring-2 ring-purple-100" />
+                <button
+                  type="button"
+                  onClick={() => setShowCreatePostModal(true)}
+                  className="flex-1 text-left px-4 py-2.5 rounded-2xl bg-slate-50 hover:bg-slate-100 text-xs text-slate-400 hover:text-slate-600 transition font-medium"
+                >
+                  Share a study note, formula, or takeaway with peers...
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowCreatePostModal(true)}
+                  className="px-4 py-2.5 rounded-2xl bg-[#6D5CAE] hover:bg-[#584699] text-white font-bold text-xs flex items-center gap-1.5 transition shadow-sm shrink-0"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Post
+                </button>
+              </div>
+
               {/* Filter Tabs, Search & AI Personas */}
               <FeedFilters
                 feedTab={feedTab}
@@ -281,14 +315,22 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
                   <BookOpen className="w-8 h-8 text-[#6D5CAE] mx-auto mb-2" />
                   <h3 className="font-bold text-slate-800 text-sm">Your feed is waiting for notes</h3>
                   <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-                    Upload your study notes (.pdf, .txt, .md) to generate personalized, grounded study cards.
+                    Upload your study notes (.pdf, .txt, .md) or click "Post" to share your first study card.
                   </p>
-                  <button
-                    onClick={() => setShowUploadModal(true)}
-                    className="mt-4 px-4 py-2 rounded-xl bg-[#1C1B22] text-white text-xs font-semibold"
-                  >
-                    Upload My First Notes
-                  </button>
+                  <div className="flex items-center justify-center gap-3 mt-4">
+                    <button
+                      onClick={() => setShowCreatePostModal(true)}
+                      className="px-4 py-2 rounded-xl bg-[#6D5CAE] text-white text-xs font-semibold hover:bg-[#584699] transition"
+                    >
+                      + Create Post
+                    </button>
+                    <button
+                      onClick={() => setShowUploadModal(true)}
+                      className="px-4 py-2 rounded-xl bg-[#1C1B22] text-white text-xs font-semibold hover:bg-slate-800 transition"
+                    >
+                      Upload Notes
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-6">
@@ -296,6 +338,7 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
                     <PostCard
                       key={post.id}
                       post={post}
+                      currentUserId={user.id}
                       onLike={(postId) => likeMutation.mutate(postId)}
                       onSave={(postId) => saveMutation.mutate(postId)}
                       onShare={handleShare}
@@ -304,6 +347,8 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
                       onAddComment={(postId, content) =>
                         commentMutation.mutate({ postId, content })
                       }
+                      onDelete={(postId) => deletePostMutation.mutate(postId)}
+                      isDeleting={deletePostMutation.isPending}
                     />
                   ))}
                 </div>
@@ -359,7 +404,16 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
         onSuccess={triggerToast}
       />
 
+      <CreatePostModal
+        isOpen={showCreatePostModal}
+        currentUser={user}
+        defaultSubject={user.preferences[0] ?? ''}
+        onClose={() => setShowCreatePostModal(false)}
+        onSuccess={triggerToast}
+      />
+
       <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
     </div>
   );
 };
+
