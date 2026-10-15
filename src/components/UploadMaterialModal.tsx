@@ -80,7 +80,7 @@ export const UploadMaterialModal: React.FC<Props> = ({
           {isAiActive ? (
             <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              Gemini 2.5 Active
+              Gemini 3 Flash Active
             </span>
           ) : (
             <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">

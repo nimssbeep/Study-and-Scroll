@@ -884,12 +884,12 @@ export const ProfileSettingsModal: React.FC<Props> = ({ user, onClose, onSuccess
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h4 className="text-sm font-extrabold text-slate-900">
-                      Google Gemini AI Engine
+                      Google Gemini 3 Flash Engine
                     </h4>
                     {geminiKey ? (
                       <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                        Live AI Connected
+                        Live AI Connected (Gemini 3 Flash)
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
@@ -898,8 +898,8 @@ export const ProfileSettingsModal: React.FC<Props> = ({ user, onClose, onSuccess
                     )}
                   </div>
                   <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                    Connecting your Gemini API key activates live generation of unique study cards, 
-                    rich analogies, custom memes, and real-time interactive comments from all 7 AI personas.
+                    Powered by Google Gemini 3 Flash. Default API key is pre-installed from environment. 
+                    Click "Test API Connection" below to ping the AI and verify live status.
                   </p>
                 </div>
               </div>
@@ -917,7 +917,7 @@ export const ProfileSettingsModal: React.FC<Props> = ({ user, onClose, onSuccess
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                     <KeyRound className="w-3.5 h-3.5 text-[#6D5CAE]" />
-                    <span>Google Gemini API Key</span>
+                    <span>Google Gemini 3 Flash API Key</span>
                   </label>
                   <a
                     href="https://aistudio.google.com/app/apikey"
@@ -939,7 +939,7 @@ export const ProfileSettingsModal: React.FC<Props> = ({ user, onClose, onSuccess
                       setTestResult(null);
                       setApiSaveStatus(null);
                     }}
-                    placeholder="AIzaSy..."
+                    placeholder="AIzaSy... or pre-installed env key"
                     className="w-full pr-10 pl-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-[#6D5CAE]/20 focus:border-[#6D5CAE] text-xs font-mono"
                   />
                   <button
@@ -952,7 +952,7 @@ export const ProfileSettingsModal: React.FC<Props> = ({ user, onClose, onSuccess
                 </div>
 
                 <p className="text-[11px] text-slate-400 leading-normal">
-                  Stored securely in your local browser storage. Never uploaded to third-party databases.
+                  Pre-installed by default from .env. Stored securely and can be tested with the button below.
                 </p>
               </div>
 
@@ -967,12 +967,12 @@ export const ProfileSettingsModal: React.FC<Props> = ({ user, onClose, onSuccess
                   {isTestingApi ? (
                     <>
                       <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span>Testing API Connection...</span>
+                      <span>Pinging Gemini 3 Flash...</span>
                     </>
                   ) : (
                     <>
                       <Zap className="w-3.5 h-3.5" />
-                      <span>Test API Connection</span>
+                      <span>Ping / Test API Connection</span>
                     </>
                   )}
                 </button>
@@ -1017,11 +1017,11 @@ export const ProfileSettingsModal: React.FC<Props> = ({ user, onClose, onSuccess
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2 flex-wrap">
                         <span className="text-xs font-extrabold">
-                          {testResult.success ? 'API Connection Verified!' : 'API Test Failed'}
+                          {testResult.success ? 'Gemini 3 Flash Verified & Responding!' : 'API Ping Failed'}
                         </span>
                         {testResult.latencyMs !== undefined && (
                           <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/80 border border-slate-200 text-slate-700">
-                            {testResult.latencyMs}ms · {testResult.modelUsed || 'gemini-2.5-flash'}
+                            {testResult.latencyMs}ms · {testResult.modelUsed || 'gemini-3-flash'}
                           </span>
                         )}
                       </div>

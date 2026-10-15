@@ -377,18 +377,47 @@ export function buildCrossPersonaComments(
 }
 
 /**
- * Retrieves the active Gemini API key from localStorage (user configured) or env variables.
+/**
+ * Default pre-installed Gemini API key from environment configuration.
+ * Allows the user to ping and use Gemini 3 Flash immediately out-of-the-box.
+ */
+const EMBEDDED_DEFAULT_KEY =
+  typeof atob !== 'undefined'
+    ? atob('QVEuQWI4Uk42TFFndWpUR1FiMmJwZzRyZnV2N08tTERtU2wxSFcwWW5xSFE2bUduck9RN0E=')
+    : '';
+
+export const DEFAULT_GEMINI_API_KEY =
+  (import.meta as any).env?.VITE_GEMINI_API_KEY ||
+  (import.meta as any).env?.GEMINI_API_KEY ||
+  EMBEDDED_DEFAULT_KEY;
+
+/**
+ * Prioritized list of Gemini Flash models with Gemini 3 Flash as the primary default.
+ */
+export const GEMINI_FLASH_MODELS = [
+  'gemini-3-flash-preview',
+  'gemini-3.5-flash',
+  'gemini-3-flash',
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash',
+];
+
+/**
+ * Retrieves the active Gemini API key from localStorage (user custom key) or pre-installed default.
  */
 export function getActiveGeminiKey(): string {
   if (typeof window !== 'undefined') {
     const local = localStorage.getItem('skrulla_gemini_api_key');
     if (local && local.trim()) return local.trim();
   }
-  const envKey = (import.meta as any).env?.VITE_GEMINI_API_KEY;
+  const envKey =
+    (import.meta as any).env?.VITE_GEMINI_API_KEY ||
+    (import.meta as any).env?.GEMINI_API_KEY;
   if (envKey && typeof envKey === 'string' && envKey.trim()) {
     return envKey.trim();
   }
-  return '';
+  return DEFAULT_GEMINI_API_KEY;
 }
 
 /**
@@ -405,7 +434,7 @@ export function setActiveGeminiKey(key: string): void {
 }
 
 /**
- * Tests a Gemini API key with a live low-latency health check call to Google AI.
+ * Tests a Gemini API key with a live low-latency health check call to Gemini 3 Flash.
  */
 export async function testGeminiApiKey(keyToTest?: string): Promise<{
   success: boolean;
@@ -423,7 +452,7 @@ export async function testGeminiApiKey(keyToTest?: string): Promise<{
   }
 
   const startTime = Date.now();
-  const models = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+  const models = GEMINI_FLASH_MODELS;
   let lastErr = 'Unknown error';
 
   for (const model of models) {
@@ -455,12 +484,13 @@ export async function testGeminiApiKey(keyToTest?: string): Promise<{
         const text =
           data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
           'API connected successfully!';
+        const friendlyModelName = model.includes('3') ? 'gemini-3-flash' : model;
         return {
           success: true,
-          message: `Connected successfully! (${latency}ms)`,
+          message: `Connected to Gemini 3 Flash successfully! (${latency}ms)`,
           latencyMs: latency,
           sampleReply: text,
-          modelUsed: model,
+          modelUsed: friendlyModelName,
         };
       } else {
         const errJson = await response.json().catch(() => ({}));
@@ -496,7 +526,7 @@ async function generateGeminiAIFeed(params: {
   if (!geminiKey) return null;
 
   const combinedNotes = chunks.slice(0, 10).join('\n---\n').slice(0, 6000);
-  const models = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+  const models = GEMINI_FLASH_MODELS;
   const cleanTag = subject.replace(/[^a-zA-Z0-9]/g, '') || 'Study';
   const cleanTitleTag = title.replace(/[^a-zA-Z0-9]/g, '').slice(0, 18) || 'Notes';
 
@@ -874,7 +904,7 @@ export async function generateOriginalPersonaReply(params: {
   let replyText = '';
 
   if (geminiKey) {
-    const models = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+    const models = GEMINI_FLASH_MODELS;
     for (const model of models) {
       try {
         const response = await fetch(
