@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   BookOpen, Home, Compass, Users, Bookmark, Plus, Zap, Bell, Search,
-  Heart, MessageCircle, Send, ShieldCheck, Sparkles, LogOut, CheckCircle2, X
+  Heart, MessageCircle, Send, ShieldCheck, Sparkles, LogOut, CheckCircle2, X,
+  Camera
 } from 'lucide-react';
 import { apiFetch, setAuthSession } from '../lib/api';
 import { cleanInput, validateEducationalFile } from '../lib/sanitize';
 import { OnboardingModal } from './OnboardingModal';
+import { UserAvatar } from '../components/UserAvatar';
 import type {
   User, FeedPost, StudyMaterialItem, StoryItem, FriendUser
 } from '../types';
@@ -15,6 +17,7 @@ const PERSONAS = ['All personas', 'The Memer', 'Thread Architect', 'Storyteller'
 
 export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
   const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [activeNav, setActiveNav] = useState<'home' | 'explore' | 'friends' | 'saved'>('home');
   const [feedTab, setFeedTab] = useState<'for_you' | 'following'>('for_you');
@@ -72,7 +75,35 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
     queryFn: () => apiFetch<FriendUser[]>('/api/social/friends'),
   });
 
-  // Mutations
+  // User Profile Picture Upload Mutations
+  const avatarMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return apiFetch<User>('/api/auth/avatar', {
+        method: 'POST',
+        body: formData,
+      });
+    },
+    onSuccess: (updatedUser) => {
+      queryClient.setQueryData(['currentUser'], updatedUser);
+      queryClient.invalidateQueries({ queryKey: ['currentUser'] });
+      queryClient.invalidateQueries({ queryKey: ['feed'] });
+      queryClient.invalidateQueries({ queryKey: ['stories'] });
+    },
+  });
+
+  const removeAvatarMutation = useMutation({
+    mutationFn: () => apiFetch<User>('/api/auth/avatar', { method: 'DELETE' }),
+    onSuccess: (updatedUser) => {
+      queryClient.setQueryData(['currentUser'], updatedUser);
+      queryClient.invalidateQueries({ queryKey: ['currentUser'] });
+      queryClient.invalidateQueries({ queryKey: ['feed'] });
+      queryClient.invalidateQueries({ queryKey: ['stories'] });
+    },
+  });
+
+  // Feed Mutations
   const likeMutation = useMutation({
     mutationFn: (postId: number) => apiFetch(`/api/feed/${postId}/like`, { method: 'POST' }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['feed'] }),
@@ -182,6 +213,20 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
         />
       )}
 
+      {/* Hidden file input for uploading profile picture */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            avatarMutation.mutate(file);
+          }
+        }}
+      />
+
       {/* Top Navigation Header */}
       <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-100 px-6 py-3.5 flex items-center justify-between">
         <div className="flex items-center gap-8">
@@ -215,11 +260,16 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
           <button className="p-2 rounded-full hover:bg-slate-100 text-slate-600">
             <Bell className="w-4 h-4" />
           </button>
-          <img
-            src={user.avatar_url}
-            alt={user.name}
-            className="w-8 h-8 rounded-full object-cover ring-2 ring-purple-200"
-          />
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            className="cursor-pointer group relative"
+            title="Click to upload profile picture"
+          >
+            <UserAvatar name={user.name} avatarUrl={user.avatar_url} size="sm" className="ring-2 ring-purple-200" />
+            <div className="absolute inset-0 bg-black/40 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+              <Camera className="w-3 h-3 text-white" />
+            </div>
+          </div>
         </div>
       </header>
 
@@ -228,17 +278,40 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
         {/* LEFT SIDEBAR */}
         <aside className="lg:col-span-3 space-y-6">
           <div className="bg-white rounded-3xl p-5 border border-slate-100 text-center">
-            <div className="relative inline-block">
-              <img
-                src={user.avatar_url}
-                alt={user.name}
-                className="w-16 h-16 rounded-full object-cover mx-auto ring-4 ring-purple-100"
+            {/* Interactive Profile Picture with Upload Button */}
+            <div className="relative inline-block group">
+              <UserAvatar
+                name={user.name}
+                avatarUrl={user.avatar_url}
+                size="xl"
+                className="mx-auto ring-4 ring-purple-100"
               />
-              <span className="absolute -left-2 top-1 w-7 h-7 rounded-full bg-purple-100 text-[#6D5CAE] flex items-center justify-center text-xs">
-                ✦
-              </span>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={avatarMutation.isPending}
+                className="absolute bottom-0 right-0 p-1.5 rounded-full bg-[#6D5CAE] text-white hover:bg-[#59469B] shadow-md ring-2 ring-white transition"
+                title="Upload custom profile picture"
+              >
+                <Camera className="w-3.5 h-3.5" />
+              </button>
             </div>
-            <h3 className="font-bold text-slate-900 mt-3">{user.name}</h3>
+
+            {avatarMutation.isPending && (
+              <p className="text-[11px] text-[#6D5CAE] font-semibold mt-1">Uploading photo...</p>
+            )}
+
+            {user.avatar_url && !avatarMutation.isPending && (
+              <button
+                type="button"
+                onClick={() => removeAvatarMutation.mutate()}
+                className="block mx-auto mt-1 text-[10px] text-slate-400 hover:text-rose-600 transition"
+              >
+                Remove photo
+              </button>
+            )}
+
+            <h3 className="font-bold text-slate-900 mt-2">{user.name}</h3>
             <p className="text-xs text-slate-400">{user.handle}</p>
             <span className="mt-2 inline-block text-[10px] font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
               {user.education_level}
@@ -330,17 +403,18 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
             </p>
           </div>
 
-          {/* Instagram-Style Stories Row */}
+          {/* Real User Stories Row */}
           <div className="flex items-center gap-4 overflow-x-auto pb-2">
             <button
               onClick={() => setShowStoryModal(true)}
               className="flex flex-col items-center gap-1.5 shrink-0"
             >
               <div className="relative p-0.5 rounded-full bg-gradient-to-tr from-purple-400 to-pink-400">
-                <img
-                  src={user.avatar_url}
-                  alt="Your story"
-                  className="w-14 h-14 rounded-full object-cover border-2 border-white"
+                <UserAvatar
+                  name={user.name}
+                  avatarUrl={user.avatar_url}
+                  size="lg"
+                  className="border-2 border-white"
                 />
                 <span className="absolute bottom-0 right-0 w-5 h-5 rounded-full bg-[#6D5CAE] text-white flex items-center justify-center text-xs font-bold ring-2 ring-white">
                   +
@@ -356,10 +430,11 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
                 className="flex flex-col items-center gap-1.5 shrink-0"
               >
                 <div className="p-0.5 rounded-full bg-gradient-to-tr from-[#6D5CAE] via-purple-400 to-amber-300">
-                  <img
-                    src={st.author_avatar}
-                    alt={st.author_name}
-                    className="w-14 h-14 rounded-full object-cover border-2 border-white"
+                  <UserAvatar
+                    name={st.author_name}
+                    avatarUrl={st.author_avatar}
+                    size="lg"
+                    className="border-2 border-white"
                   />
                 </div>
                 <span className="text-[11px] font-medium text-slate-600">
@@ -383,39 +458,45 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
           {activeNav === 'friends' ? (
             <div className="bg-white rounded-3xl p-6 border border-slate-100 space-y-4">
               <h2 className="text-lg font-extrabold">Study Peers &amp; Friends</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {friendsList.map((peer) => (
-                  <div
-                    key={peer.id}
-                    className="p-4 rounded-2xl border border-slate-100 flex items-center justify-between"
-                  >
-                    <div className="flex items-center gap-3">
-                      <img
-                        src={peer.avatar_url}
-                        alt={peer.name}
-                        className="w-11 h-11 rounded-full object-cover"
-                      />
-                      <div>
-                        <p className="text-xs font-bold text-slate-900">{peer.name}</p>
-                        <p className="text-[11px] text-slate-400">{peer.handle}</p>
-                        <p className="text-[10px] text-[#6D5CAE] mt-0.5">
-                          {peer.preferences.join(' • ')}
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => toggleFriendMutation.mutate(peer.id)}
-                      className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition ${
-                        peer.is_friend
-                          ? 'bg-slate-100 text-slate-700'
-                          : 'bg-[#1C1B22] text-white'
-                      }`}
+              {friendsList.length === 0 ? (
+                <div className="text-center py-10 bg-slate-50/60 rounded-2xl border border-dashed border-slate-200">
+                  <Users className="w-8 h-8 text-slate-400 mx-auto mb-2" />
+                  <p className="text-xs font-bold text-slate-700">No other registered learners yet</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Invite classmates or create another account to test the friend network!
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {friendsList.map((peer) => (
+                    <div
+                      key={peer.id}
+                      className="p-4 rounded-2xl border border-slate-100 flex items-center justify-between"
                     >
-                      {peer.is_friend ? 'Friends ✓' : 'Add Friend'}
-                    </button>
-                  </div>
-                ))}
-              </div>
+                      <div className="flex items-center gap-3">
+                        <UserAvatar name={peer.name} avatarUrl={peer.avatar_url} size="md" />
+                        <div>
+                          <p className="text-xs font-bold text-slate-900">{peer.name}</p>
+                          <p className="text-[11px] text-slate-400">{peer.handle}</p>
+                          <p className="text-[10px] text-[#6D5CAE] mt-0.5">
+                            {(peer.preferences || []).join(' • ') || peer.education_level}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => toggleFriendMutation.mutate(peer.id)}
+                        className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition ${
+                          peer.is_friend
+                            ? 'bg-slate-100 text-slate-700'
+                            : 'bg-[#1C1B22] text-white'
+                        }`}
+                      >
+                        {peer.is_friend ? 'Friends ✓' : 'Add Friend'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
             <>
@@ -477,6 +558,20 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
               {loadingPosts ? (
                 <div className="p-12 text-center text-xs text-slate-400">
                   Loading verified study cards...
+                </div>
+              ) : posts.length === 0 ? (
+                <div className="bg-white rounded-3xl p-10 border border-slate-100 text-center">
+                  <BookOpen className="w-8 h-8 text-[#6D5CAE] mx-auto mb-2" />
+                  <h3 className="font-bold text-slate-800 text-sm">Your feed is waiting for notes</h3>
+                  <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                    Upload your study notes (.pdf, .txt, .md) to generate personalized, grounded study cards.
+                  </p>
+                  <button
+                    onClick={() => setShowUploadModal(true)}
+                    className="mt-4 px-4 py-2 rounded-xl bg-[#1C1B22] text-white text-xs font-semibold"
+                  >
+                    Upload My First Notes
+                  </button>
                 </div>
               ) : (
                 <div className="space-y-6">
@@ -591,24 +686,17 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
                             )}
                           </div>
                         ) : (
-                          <div className="relative rounded-2xl overflow-hidden bg-slate-900 text-white p-6 min-h-[260px] flex flex-col justify-between">
-                            {post.image_url && (
-                              <img
-                                src={post.image_url}
-                                alt={post.headline}
-                                className="absolute inset-0 w-full h-full object-cover opacity-45"
-                              />
-                            )}
+                          <div className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-indigo-950 via-slate-900 to-purple-950 text-white p-6 min-h-[220px] flex flex-col justify-between shadow-sm">
                             <div className="relative z-10">
                               <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-300">
                                 • {post.series_tag}
                               </span>
                             </div>
-                            <div className="relative z-10 mt-16">
-                              <p className="text-[10px] uppercase tracking-widest text-slate-300">
-                                A LITTLE PERSPECTIVE
+                            <div className="relative z-10 mt-10">
+                              <p className="text-[10px] uppercase tracking-widest text-slate-400">
+                                KEY TAKEAWAY
                               </p>
-                              <h2 className="text-3xl font-serif leading-tight mt-1">
+                              <h2 className="text-2xl font-serif leading-tight mt-1">
                                 {post.headline}
                               </h2>
                             </div>
@@ -738,7 +826,7 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
 
         {/* RIGHT SIDEBAR */}
         <aside className="lg:col-span-3 space-y-6">
-          {/* Study Stories Cards */}
+          {/* Study Stories */}
           <div>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-extrabold text-slate-900">Study stories</h3>
@@ -749,35 +837,45 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
                 + Add story
               </button>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              {stories.slice(0, 2).map((st) => (
+            {stories.length === 0 ? (
+              <div className="p-4 rounded-3xl bg-purple-50/60 border border-purple-100 text-center">
+                <Sparkles className="w-5 h-5 text-[#6D5CAE] mx-auto mb-1.5" />
+                <p className="text-xs font-bold text-slate-800">Share your study era</p>
+                <p className="text-[10px] text-slate-500 mt-0.5">Inspire others with what you are learning.</p>
                 <button
-                  key={st.id}
-                  onClick={() => setActiveStory(st)}
-                  className={`p-4 rounded-3xl bg-gradient-to-br ${st.bg_gradient} text-left flex flex-col justify-between min-h-[170px] shadow-sm`}
+                  onClick={() => setShowStoryModal(true)}
+                  className="mt-2 text-xs font-bold text-[#6D5CAE] hover:underline"
                 >
-                  <span className="text-[9px] font-bold uppercase tracking-widest text-slate-500">
-                    {st.tag}
-                  </span>
-                  <p className="text-sm font-extrabold text-slate-800 leading-snug my-2">
-                    {st.title}
-                  </p>
-                  <div className="flex items-center gap-1.5 bg-white/80 backdrop-blur px-2 py-1 rounded-full">
-                    <img
-                      src={st.author_avatar}
-                      alt={st.author_name}
-                      className="w-4 h-4 rounded-full object-cover"
-                    />
-                    <span className="text-[10px] font-semibold text-slate-700 truncate">
-                      {st.author_name.split(' ')[0]}
-                    </span>
-                  </div>
+                  + Add story
                 </button>
-              ))}
-            </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                {stories.slice(0, 2).map((st) => (
+                  <button
+                    key={st.id}
+                    onClick={() => setActiveStory(st)}
+                    className={`p-4 rounded-3xl bg-gradient-to-br ${st.bg_gradient} text-left flex flex-col justify-between min-h-[170px] shadow-sm`}
+                  >
+                    <span className="text-[9px] font-bold uppercase tracking-widest text-slate-500">
+                      {st.tag}
+                    </span>
+                    <p className="text-sm font-extrabold text-slate-800 leading-snug my-2">
+                      {st.title}
+                    </p>
+                    <div className="flex items-center gap-1.5 bg-white/80 backdrop-blur px-2 py-1 rounded-full">
+                      <UserAvatar name={st.author_name} avatarUrl={st.author_avatar} size="xs" />
+                      <span className="text-[10px] font-semibold text-slate-700 truncate">
+                        {st.author_name.split(' ')[0]}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
-          {/* Suggested Friends ("Your kind of curious") */}
+          {/* Suggested Peers ("Your kind of curious") */}
           <div className="bg-white rounded-3xl p-5 border border-slate-100">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-extrabold text-slate-900">Your kind of curious</h3>
@@ -790,33 +888,33 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
             </div>
             <p className="text-[11px] text-slate-400 mt-0.5 mb-4">Good minds think together.</p>
 
-            <div className="space-y-3">
-              {friendsList.slice(0, 3).map((peer) => (
-                <div key={peer.id} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <img
-                      src={peer.avatar_url}
-                      alt={peer.name}
-                      className="w-9 h-9 rounded-full object-cover"
-                    />
-                    <div>
-                      <p className="text-xs font-bold text-slate-900">{peer.name}</p>
-                      <p className="text-[10px] text-slate-400">{peer.handle}</p>
+            {friendsList.length === 0 ? (
+              <p className="text-xs text-slate-400 italic">No other users online yet. Invite classmates to study together!</p>
+            ) : (
+              <div className="space-y-3">
+                {friendsList.slice(0, 3).map((peer) => (
+                  <div key={peer.id} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <UserAvatar name={peer.name} avatarUrl={peer.avatar_url} size="sm" />
+                      <div>
+                        <p className="text-xs font-bold text-slate-900">{peer.name}</p>
+                        <p className="text-[10px] text-slate-400">{peer.handle}</p>
+                      </div>
                     </div>
+                    <button
+                      onClick={() => toggleFriendMutation.mutate(peer.id)}
+                      className={`px-3 py-1 rounded-full text-[11px] font-semibold ${
+                        peer.is_friend
+                          ? 'bg-slate-100 text-slate-700'
+                          : 'bg-[#1C1B22] text-white'
+                      }`}
+                    >
+                      {peer.is_friend ? 'Following' : 'Follow'}
+                    </button>
                   </div>
-                  <button
-                    onClick={() => toggleFriendMutation.mutate(peer.id)}
-                    className={`px-3 py-1 rounded-full text-[11px] font-semibold ${
-                      peer.is_friend
-                        ? 'bg-slate-100 text-slate-700'
-                        : 'bg-[#1C1B22] text-white'
-                    }`}
-                  >
-                    {peer.is_friend ? 'Following' : 'Follow'}
-                  </button>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* A Little Rabbit Hole (Topic Filters) */}
@@ -856,7 +954,7 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
                 <span className="text-xs text-slate-600 ml-1">cards learned this week</span>
               </div>
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-200 text-[#534092]">
-                ↗ 18%
+                ↗
               </span>
             </div>
           </div>
@@ -864,23 +962,27 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
           {/* On Your Bookshelf (Uploaded Materials) */}
           <div className="bg-white rounded-3xl p-5 border border-slate-100">
             <h3 className="text-sm font-extrabold text-slate-900 mb-3">On your bookshelf</h3>
-            <div className="space-y-2.5">
-              {materials.slice(0, 4).map((m) => (
-                <div
-                  key={m.id}
-                  onClick={() => setSelectedSubject(m.subject)}
-                  className="p-2.5 rounded-2xl hover:bg-slate-50 flex items-center justify-between cursor-pointer"
-                >
-                  <div>
-                    <p className="text-xs font-bold text-slate-800">{m.title}</p>
-                    <p className="text-[10px] text-slate-400">
-                      {m.cards_count} bite-sized ideas • {m.subject}
-                    </p>
+            {materials.length === 0 ? (
+              <p className="text-xs text-slate-400 italic">No notes uploaded yet.</p>
+            ) : (
+              <div className="space-y-2.5">
+                {materials.slice(0, 4).map((m) => (
+                  <div
+                    key={m.id}
+                    onClick={() => setSelectedSubject(m.subject)}
+                    className="p-2.5 rounded-2xl hover:bg-slate-50 flex items-center justify-between cursor-pointer"
+                  >
+                    <div>
+                      <p className="text-xs font-bold text-slate-800">{m.title}</p>
+                      <p className="text-[10px] text-slate-400">
+                        {m.cards_count} bite-sized ideas • {m.subject}
+                      </p>
+                    </div>
+                    <span className="text-xs text-slate-400">→</span>
                   </div>
-                  <span className="text-xs text-slate-400">→</span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
             <button
               onClick={() => setShowUploadModal(true)}
               className="mt-3 w-full py-2 text-xs font-semibold text-slate-500 hover:text-slate-900 flex items-center justify-center gap-1 border-t border-slate-100 pt-3"
@@ -1040,10 +1142,11 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <img
-                  src={activeStory.author_avatar}
-                  alt={activeStory.author_name}
-                  className="w-9 h-9 rounded-full object-cover ring-2 ring-white"
+                <UserAvatar
+                  name={activeStory.author_name}
+                  avatarUrl={activeStory.author_avatar}
+                  size="sm"
+                  className="ring-2 ring-white"
                 />
                 <div>
                   <p className="text-xs font-bold text-slate-900">{activeStory.author_name}</p>

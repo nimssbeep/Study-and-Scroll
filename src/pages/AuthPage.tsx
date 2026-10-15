@@ -117,25 +117,19 @@ export const AuthPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3 text-xs text-slate-600">
-          <div className="flex -space-x-2">
-            <img
-              src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=80"
-              alt="Student"
-              className="w-7 h-7 rounded-full ring-2 ring-white object-cover"
-            />
-            <img
-              src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=80"
-              alt="Student"
-              className="w-7 h-7 rounded-full ring-2 ring-white object-cover"
-            />
-            <img
-              src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=80"
-              alt="Student"
-              className="w-7 h-7 rounded-full ring-2 ring-white object-cover"
-            />
+          <div className="flex -space-x-1.5">
+            <span className="w-7 h-7 rounded-full bg-purple-200 text-[#59469B] flex items-center justify-center font-bold text-[10px] ring-2 ring-white">
+              ✦
+            </span>
+            <span className="w-7 h-7 rounded-full bg-indigo-200 text-indigo-700 flex items-center justify-center font-bold text-[10px] ring-2 ring-white">
+              📖
+            </span>
+            <span className="w-7 h-7 rounded-full bg-amber-200 text-amber-800 flex items-center justify-center font-bold text-[10px] ring-2 ring-white">
+              ⚡
+            </span>
           </div>
           <div>
-            <p className="font-semibold text-slate-800">Good minds. Great company.</p>
+            <p className="font-semibold text-slate-800">Learn on your terms.</p>
             <p className="text-slate-500 text-[11px]">Your learning era starts here.</p>
           </div>
         </div>

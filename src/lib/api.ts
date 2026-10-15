@@ -15,6 +15,15 @@ export function setAuthSession(token: string | null, csrf: string | null) {
   }
 }
 
+export function getAvatarUrl(path?: string | null): string {
+  if (!path) return '';
+  if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('data:')) {
+    return path;
+  }
+  const base = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
+  return `${base}${path.startsWith('/') ? '' : '/'}${path}`;
+}
+
 export async function apiFetch<T>(
   endpoint: string,
   options: RequestInit = {}
