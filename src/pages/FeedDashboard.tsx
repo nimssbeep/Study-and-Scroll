@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   BookOpen, Home, Compass, Users, Bookmark, Plus, Zap, Bell, Search,
   Heart, MessageCircle, Send, ShieldCheck, Sparkles, LogOut, CheckCircle2, X,
-  Camera, UserPlus, UserCheck, Check, Clock, Share2
+  Camera, UserPlus, UserCheck, Check, Clock, Share2, Trash2, Archive
 } from 'lucide-react';
 import { apiFetch, setAuthSession } from '../lib/api';
 import { cleanInput, validateEducationalFile } from '../lib/sanitize';
@@ -13,6 +13,20 @@ import { UserAvatar } from '../components/UserAvatar';
 import type {
   User, FeedPost, StudyMaterialItem, StoryItem, FriendUser, NotificationItem
 } from '../types';
+
+function formatRemainingTime(expiresAt?: string): string {
+  if (!expiresAt) return '24h story';
+  try {
+    const ms = new Date(expiresAt).getTime() - Date.now();
+    if (ms <= 0) return 'Expired (Archived)';
+    const hours = Math.floor(ms / (1000 * 60 * 60));
+    const mins = Math.floor((ms % (1000 * 60 * 60)) / (1000 * 60));
+    if (hours > 0) return `${hours}h ${mins}m left`;
+    return `${mins}m left`;
+  } catch {
+    return '24h story';
+  }
+}
 
 export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
   const queryClient = useQueryClient();
@@ -43,6 +57,7 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
   const [showOnboarding, setShowOnboarding] = useState(!user.onboarding_completed);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showStoryModal, setShowStoryModal] = useState(false);
+  const [showArchiveModal, setShowArchiveModal] = useState(false);
   const [activeStory, setActiveStory] = useState<StoryItem | null>(null);
 
   // Quiz answer state: { [postId]: selectedOptionIndex }
@@ -82,6 +97,12 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
   const { data: stories = [] } = useQuery({
     queryKey: ['stories'],
     queryFn: () => apiFetch<StoryItem[]>('/api/social/stories'),
+  });
+
+  const { data: storyArchive = [], isLoading: loadingArchive } = useQuery<StoryItem[]>({
+    queryKey: ['story_archive'],
+    queryFn: () => apiFetch<StoryItem[]>('/api/social/stories/archive'),
+    enabled: showArchiveModal,
   });
 
   // Notifications Query (polls every 8s for live real-time feel)
@@ -268,6 +289,30 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
       setShowStoryModal(false);
       setStoryTitle('');
       queryClient.invalidateQueries({ queryKey: ['stories'] });
+      queryClient.invalidateQueries({ queryKey: ['story_archive'] });
+      triggerToast('Story published! Live for 24 hours.');
+    },
+  });
+
+  const deleteStoryMutation = useMutation({
+    mutationFn: (storyId: number) =>
+      apiFetch(`/api/social/stories/${storyId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      setActiveStory(null);
+      queryClient.invalidateQueries({ queryKey: ['stories'] });
+      queryClient.invalidateQueries({ queryKey: ['story_archive'] });
+      triggerToast('Story deleted.');
+    },
+  });
+
+  const archiveStoryMutation = useMutation({
+    mutationFn: (storyId: number) =>
+      apiFetch(`/api/social/stories/${storyId}/archive`, { method: 'POST' }),
+    onSuccess: () => {
+      setActiveStory(null);
+      queryClient.invalidateQueries({ queryKey: ['stories'] });
+      queryClient.invalidateQueries({ queryKey: ['story_archive'] });
+      triggerToast('Story moved to your archive.');
     },
   });
 
@@ -1162,12 +1207,23 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
           <div>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-extrabold text-slate-900">Study stories</h3>
-              <button
-                onClick={() => setShowStoryModal(true)}
-                className="text-[11px] font-semibold text-[#6D5CAE]"
-              >
-                + Add story
-              </button>
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setShowArchiveModal(true)}
+                  className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 flex items-center gap-1 transition"
+                  title="View your archived stories (24h+)"
+                >
+                  <Archive className="w-3.5 h-3.5" /> Archive
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowStoryModal(true)}
+                  className="text-[11px] font-semibold text-[#6D5CAE] hover:underline"
+                >
+                  + Add story
+                </button>
+              </div>
             </div>
             {stories.length === 0 ? (
               <div className="p-4 rounded-3xl bg-purple-50/60 border border-purple-100 text-center">
@@ -1466,7 +1522,7 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className={`max-w-sm w-full rounded-3xl p-8 bg-gradient-to-br ${activeStory.bg_gradient} shadow-2xl min-h-[420px] flex flex-col justify-between`}
+            className={`max-w-sm w-full rounded-3xl p-8 bg-gradient-to-br ${activeStory.bg_gradient} shadow-2xl min-h-[440px] flex flex-col justify-between relative`}
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
@@ -1481,12 +1537,47 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
                   <p className="text-[10px] text-slate-600">{activeStory.author_handle}</p>
                 </div>
               </div>
-              <button onClick={() => setActiveStory(null)}>
-                <X className="w-5 h-5 text-slate-700" />
-              </button>
+
+              <div className="flex items-center gap-1.5">
+                {activeStory.user_id === user.id && (
+                  <>
+                    {!activeStory.is_archived && (
+                      <button
+                        type="button"
+                        onClick={() => archiveStoryMutation.mutate(activeStory.id)}
+                        disabled={archiveStoryMutation.isPending}
+                        className="p-1.5 rounded-full bg-white/70 hover:bg-white text-slate-700 transition shadow-sm"
+                        title="Move to your archive early"
+                      >
+                        <Archive className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (window.confirm("Are you sure you want to delete this story?")) {
+                          deleteStoryMutation.mutate(activeStory.id);
+                        }
+                      }}
+                      disabled={deleteStoryMutation.isPending}
+                      className="p-1.5 rounded-full bg-rose-50 hover:bg-rose-100 text-rose-600 transition shadow-sm"
+                      title="Delete story"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setActiveStory(null)}
+                  className="p-1.5 rounded-full hover:bg-black/10 text-slate-700 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
-            <div className="my-auto">
+            <div className="my-auto py-4">
               <span className="text-[10px] font-bold uppercase tracking-widest text-slate-600">
                 {activeStory.tag} • {activeStory.subject}
               </span>
@@ -1495,9 +1586,109 @@ export const FeedDashboard: React.FC<{ user: User }> = ({ user }) => {
               </h2>
             </div>
 
-            <p className="text-[11px] text-slate-600">
-              Skrulla Study Story • {formatTimeAgo(activeStory.created_at)}
-            </p>
+            <div className="pt-3 border-t border-black/10 flex items-center justify-between text-[11px] text-slate-700">
+              <span>{formatTimeAgo(activeStory.created_at)}</span>
+              <span className="font-bold px-2.5 py-0.5 rounded-full bg-white/70 shadow-sm text-slate-800">
+                {activeStory.is_archived ? 'Archived Story' : formatRemainingTime(activeStory.expires_at)}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STORY ARCHIVE MODAL */}
+      {showArchiveModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-purple-100 text-[#6D5CAE] flex items-center justify-center font-bold">
+                  <Archive className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">Your Story Archive</h3>
+                  <p className="text-[11px] text-slate-400">
+                    Stories automatically move here after 24 hours.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowArchiveModal(false)}
+                className="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto py-4">
+              {loadingArchive ? (
+                <div className="py-12 text-center text-xs text-slate-400">
+                  Loading your archived stories...
+                </div>
+              ) : storyArchive.length === 0 ? (
+                <div className="py-12 text-center px-4 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                  <Archive className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                  <p className="text-xs font-bold text-slate-700">No archived stories yet</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5 max-w-xs mx-auto">
+                    When your study stories reach their 24-hour limit, they are saved here so you never lose your study history.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {storyArchive.map((st) => (
+                    <div
+                      key={st.id}
+                      className={`p-4 rounded-2xl bg-gradient-to-br ${st.bg_gradient} flex flex-col justify-between min-h-[160px] shadow-sm relative group`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-bold uppercase tracking-widest text-slate-500 truncate">
+                          {st.tag}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (window.confirm("Permanently delete this archived story?")) {
+                              deleteStoryMutation.mutate(st.id);
+                            }
+                          }}
+                          className="p-1.5 rounded-full bg-white/70 hover:bg-rose-100 text-slate-400 hover:text-rose-600 transition shadow-sm"
+                          title="Permanently delete from archive"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      <div
+                        onClick={() => setActiveStory(st)}
+                        className="cursor-pointer my-2 flex-1"
+                      >
+                        <h4 className="text-sm font-extrabold text-slate-900 leading-snug line-clamp-3">
+                          {st.title}
+                        </h4>
+                      </div>
+
+                      <div className="pt-2 border-t border-black/5 flex items-center justify-between text-[10px] text-slate-600">
+                        <span>{st.subject}</span>
+                        <span>{formatTimeAgo(st.created_at)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400">
+              <span>{storyArchive.length} total saved moments</span>
+              <button
+                type="button"
+                onClick={() => setShowArchiveModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

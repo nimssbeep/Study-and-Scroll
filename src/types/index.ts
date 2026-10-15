@@ -75,6 +75,8 @@ export interface StoryItem {
   subject: string;
   bg_gradient: string;
   created_at: string;
+  expires_at?: string;
+  is_archived?: boolean;
 }
 
 export interface FriendUser {
