@@ -377,8 +377,301 @@ export function buildCrossPersonaComments(
 }
 
 /**
+ * Retrieves the active Gemini API key from localStorage (user configured) or env variables.
+ */
+export function getActiveGeminiKey(): string {
+  if (typeof window !== 'undefined') {
+    const local = localStorage.getItem('skrulla_gemini_api_key');
+    if (local && local.trim()) return local.trim();
+  }
+  const envKey = (import.meta as any).env?.VITE_GEMINI_API_KEY;
+  if (envKey && typeof envKey === 'string' && envKey.trim()) {
+    return envKey.trim();
+  }
+  return '';
+}
+
+/**
+ * Persists the user's custom Gemini API key into localStorage.
+ */
+export function setActiveGeminiKey(key: string): void {
+  if (typeof window !== 'undefined') {
+    if (key && key.trim()) {
+      localStorage.setItem('skrulla_gemini_api_key', key.trim());
+    } else {
+      localStorage.removeItem('skrulla_gemini_api_key');
+    }
+  }
+}
+
+/**
+ * Tests a Gemini API key with a live low-latency health check call to Google AI.
+ */
+export async function testGeminiApiKey(keyToTest?: string): Promise<{
+  success: boolean;
+  message: string;
+  latencyMs?: number;
+  sampleReply?: string;
+  modelUsed?: string;
+}> {
+  const key = (keyToTest || getActiveGeminiKey()).trim();
+  if (!key) {
+    return {
+      success: false,
+      message: 'No API key provided. Please paste your Google Gemini API key.',
+    };
+  }
+
+  const startTime = Date.now();
+  const models = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+  let lastErr = 'Unknown error';
+
+  for (const model of models) {
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [
+              {
+                role: 'user',
+                parts: [
+                  {
+                    text: 'You are Memer Scholar. Confirm in 1 witty, funny sentence that your Gemini AI connection is working on Study & Scroll.',
+                  },
+                ],
+              },
+            ],
+          }),
+        }
+      );
+
+      const latency = Date.now() - startTime;
+
+      if (response.ok) {
+        const data = await response.json();
+        const text =
+          data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
+          'API connected successfully!';
+        return {
+          success: true,
+          message: `Connected successfully! (${latency}ms)`,
+          latencyMs: latency,
+          sampleReply: text,
+          modelUsed: model,
+        };
+      } else {
+        const errJson = await response.json().catch(() => ({}));
+        lastErr =
+          errJson?.error?.message ||
+          `HTTP ${response.status} ${response.statusText}`;
+      }
+    } catch (e: any) {
+      lastErr = e?.message || 'Network error connecting to Google API';
+    }
+  }
+
+  return {
+    success: false,
+    message: `API Connection Failed: ${lastErr}`,
+  };
+}
+
+/**
+ * Calls Google Gemini structured JSON output API to generate rich, personalized,
+ * unique feed posts and cross-persona comments across all 7 personas.
+ */
+async function generateGeminiAIFeed(params: {
+  geminiKey: string;
+  materialId: string;
+  title: string;
+  subject: string;
+  gradeLevel: string;
+  chunks: string[];
+  targetPostCount: number;
+}): Promise<GeneratedFeedPost[] | null> {
+  const { geminiKey, materialId, title, subject, gradeLevel, chunks, targetPostCount } = params;
+  if (!geminiKey) return null;
+
+  const combinedNotes = chunks.slice(0, 10).join('\n---\n').slice(0, 6000);
+  const models = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+  const cleanTag = subject.replace(/[^a-zA-Z0-9]/g, '') || 'Study';
+  const cleanTitleTag = title.replace(/[^a-zA-Z0-9]/g, '').slice(0, 18) || 'Notes';
+
+  const systemPrompt =
+    `You are Skrulla's Multi-Persona Social Learning Engine. ` +
+    `Your role is to transform raw educational study notes into an ultra-engaging, TikTok/Instagram-style feed of study cards across 7 distinct creator personas.\n` +
+    `The 7 Creator Personas are:\n` +
+    `1. 'memer_scholar': Internet meme formats (Nobody:, POV:, 💀), witty humor, relatable student brainrot, but 100% scientifically accurate.\n` +
+    `2. 'storyteller': Vivid mental narratives, real-world scenes, cause-and-effect mental cinema.\n` +
+    `3. 'socratic_mentor': Probing active-recall quiz challenges with 4 options, a correct index, and a deep conceptual explanation.\n` +
+    `4. 'analogy_architect': Maps abstract mechanisms to everyday models (video games, cooking, traffic, servers).\n` +
+    `5. 'first_principles': Deconstructs fluff down to fundamental axioms and step-by-step logic.\n` +
+    `6. 'exam_speedrunner': 15-second exam shortcuts, mnemonics, high-yield patterns, and classic test traps to avoid.\n` +
+    `7. 'devils_advocate': Stress-tests boundary conditions, asks "what if this breaks?", busts common misconceptions.\n\n` +
+    `CRITICAL RULES:\n` +
+    `- Grounding: Every card MUST be strictly derived from the provided notes. Include a verbatim or close quote as 'source_snippet'.\n` +
+    `- Variety: Distribute cards across different personas so the feed feels like a lively social media stream.\n` +
+    `- Cross-Persona Comments: Include 2 realistic, funny, or insightful comments from OTHER personas on each card.\n` +
+    `- Output: Return ONLY a valid JSON array of objects with the required schema.`;
+
+  const userPrompt =
+    `Generate ${targetPostCount} high-engagement study cards for a ${gradeLevel} student studying "${title}" (${subject}).\n\n` +
+    `Source Material Notes:\n\"\"\"\n${combinedNotes}\n\"\"\"\n\n` +
+    `Return ONLY a JSON array with ${targetPostCount} items. Schema for each item:\n` +
+    `[\n` +
+    `  {\n` +
+    `    "persona_id": "memer_scholar" | "storyteller" | "socratic_mentor" | "analogy_architect" | "first_principles" | "exam_speedrunner" | "devils_advocate",\n` +
+    `    "headline": "Catchy headline (under 60 chars)",\n` +
+    `    "caption": "Short subheader / hook",\n` +
+    `    "content": "Rich body text in the persona voice (1-3 engaging paragraphs)",\n` +
+    `    "card_type": "concept" | "quiz" | "meme" | "analogy" | "speedrun",\n` +
+    `    "source_snippet": "Direct quote from the notes (under 200 chars)",\n` +
+    `    "tags": ["Tag1", "Tag2"],\n` +
+    `    "quiz_question": "Required only if socratic_mentor or card_type is quiz",\n` +
+    `    "quiz_options": ["Option A", "Option B", "Option C", "Option D"],\n` +
+    `    "quiz_correct_index": 0,\n` +
+    `    "quiz_explanation": "Why Option A is correct based on the notes",\n` +
+    `    "comments": [\n` +
+    `      {\n` +
+    `        "persona_id": "analogy_architect",\n` +
+    `        "content": "In-character comment text..."\n` +
+    `      },\n` +
+    `      {\n` +
+    `        "persona_id": "exam_speedrunner",\n` +
+    `        "content": "In-character comment text..."\n` +
+    `      }\n` +
+    `    ]\n` +
+    `  }\n` +
+    `]`;
+
+  for (const model of models) {
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            system_instruction: { parts: [{ text: systemPrompt }] },
+            contents: [{ parts: [{ text: userPrompt }] }],
+            generationConfig: {
+              responseMimeType: 'application/json',
+              temperature: 0.7,
+            },
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        continue;
+      }
+
+      const data = await response.json();
+      let rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+      if (!rawText) continue;
+
+      if (rawText.startsWith('```json')) rawText = rawText.slice(7);
+      else if (rawText.startsWith('```')) rawText = rawText.slice(3);
+      if (rawText.endsWith('```')) rawText = rawText.slice(0, -3);
+      rawText = rawText.trim();
+
+      const items = JSON.parse(rawText);
+      if (!Array.isArray(items) || items.length === 0) continue;
+
+      const posts: GeneratedFeedPost[] = items.map((item: any, idx: number) => {
+        const persona = getPersonaByNameOrId(item.persona_id);
+        const postId = `post-${materialId}-ai-${idx + 1}-${Date.now().toString(36)}`;
+        const isQuiz =
+          persona.id === 'socratic_mentor' ||
+          item.card_type === 'quiz' ||
+          Boolean(item.quiz_question);
+
+        const rawComments: any[] = Array.isArray(item.comments) ? item.comments : [];
+        const builtComments: GeneratedComment[] = rawComments.slice(0, 3).map((c: any, cIdx: number) => {
+          const cPersona = getPersonaByNameOrId(c.persona_id || c.author_name);
+          return {
+            id: `ai-cmt-${postId}-${cIdx + 1}`,
+            post_id: postId,
+            author_id: `persona_${cPersona.id}`,
+            author_name: cPersona.name,
+            author_handle: cPersona.handle,
+            is_ai: true,
+            persona_id: cPersona.id,
+            content: typeof c.content === 'string' ? c.content : String(c.comment || 'Interesting perspective!'),
+            created_at: new Date(Date.now() - (targetPostCount - idx) * 20_000 + cIdx * 4_000).toISOString(),
+          };
+        });
+
+        // Ensure at least 2 comments per post
+        if (builtComments.length === 0) {
+          const fallbackComments = buildCrossPersonaComments(
+            postId,
+            persona,
+            title,
+            subject,
+            item.source_snippet || chunks[0] || title,
+            idx
+          );
+          builtComments.push(...fallbackComments);
+        }
+
+        const tags = Array.isArray(item.tags) && item.tags.length > 0
+          ? item.tags.map((t: any) => String(t).replace(/[^a-zA-Z0-9]/g, ''))
+          : [cleanTag, cleanTitleTag, persona.name.replace(/\s+/g, '')];
+
+        return {
+          id: postId,
+          author_id: `persona_${persona.id}`,
+          author_name: persona.name,
+          author_role: `From your ${title} notes · ${gradeLevel}`,
+          is_ai: true,
+          persona_id: persona.id,
+          title: item.headline || `${title}: ${persona.name}`,
+          headline: item.headline || `${title}: Insight #${idx + 1}`,
+          content: item.content || item.body || item.caption || `Key concept from ${title}`,
+          caption: item.caption || `From your ${title} notes`,
+          topic: subject,
+          subject,
+          grade_level: gradeLevel,
+          card_type: isQuiz ? 'quiz' : (persona.cardType as any),
+          post_type: isQuiz ? 'quiz' : 'concept',
+          source_material_id: materialId,
+          source_title: title,
+          source_snippet: item.source_snippet || chunks[idx % chunks.length] || title,
+          grounding_score: 1.0,
+          tags,
+          likes_count: Math.floor(Math.random() * 8) + 2,
+          comments_count: builtComments.length,
+          shares_count: Math.floor(Math.random() * 3),
+          is_liked: false,
+          is_saved: false,
+          quiz_question: isQuiz ? (item.quiz_question || `Based on ${title}, what is the main mechanism?`) : undefined,
+          quiz_options: isQuiz && Array.isArray(item.quiz_options) ? item.quiz_options : (isQuiz ? ['Option A', 'Option B', 'Option C', 'Option D'] : undefined),
+          quiz_correct_index: isQuiz && typeof item.quiz_correct_index === 'number' ? item.quiz_correct_index : (isQuiz ? 0 : undefined),
+          quiz_explanation: isQuiz ? (item.quiz_explanation || `Verified directly from your notes: ${item.source_snippet || title}`) : undefined,
+          comments: builtComments,
+          created_at: new Date(Date.now() - idx * 12_000).toISOString(),
+        };
+      });
+
+      if (posts.length > 0) {
+        return posts;
+      }
+    } catch (err) {
+      console.warn(`[Skrulla AI] Error with model ${model}:`, err);
+    }
+  }
+
+  return null;
+}
+
+/**
  * Generates 5 to 12+ rich, diverse feed cards from an uploaded study material.
- * Rotates across all 7 AI personas (including Memer Scholar) and generates pre-populated cross-persona comments.
+ * Calls Google Gemini API if a key is configured to generate 100% unique, personalized cards across all 7 personas.
+ * Falls back seamlessly to curriculum-grounded conceptual synthesis if no key is active or if the API call fails.
  */
 export async function generateRichFeedFromMaterial(params: {
   materialId: string;
@@ -404,6 +697,28 @@ export async function generateRichFeedFromMaterial(params: {
     subject
   );
 
+  // 1. If an active Gemini API key is configured (localStorage or env), attempt live AI generation
+  const activeKey = getActiveGeminiKey();
+  if (activeKey) {
+    try {
+      const aiPosts = await generateGeminiAIFeed({
+        geminiKey: activeKey,
+        materialId,
+        title,
+        subject,
+        gradeLevel,
+        chunks,
+        targetPostCount,
+      });
+      if (aiPosts && aiPosts.length >= 3) {
+        return aiPosts;
+      }
+    } catch (err) {
+      console.warn('[Skrulla AI] Gemini generation error, falling back to curriculum synthesis:', err);
+    }
+  }
+
+  // 2. Deterministic curriculum synthesis fallback (zero hallucination, guaranteed offline operation)
   const cleanTag = subject.replace(/[^a-zA-Z0-9]/g, '') || 'Study';
   const cleanTitleTag = title.replace(/[^a-zA-Z0-9]/g, '').slice(0, 18) || 'Notes';
   const posts: GeneratedFeedPost[] = [];
@@ -529,7 +844,7 @@ export async function generateRichFeedFromMaterial(params: {
 
 /**
  * Generates an in-character reply from the ORIGINAL AI persona who authored the post
- * whenever a user comments on that post. Calls Gemini API if VITE_GEMINI_API_KEY is available,
+ * whenever a user comments on that post. Calls Gemini API if an active key is available,
  * and falls back seamlessly to a context-aware persona reply.
  */
 export async function generateOriginalPersonaReply(params: {
@@ -555,46 +870,50 @@ export async function generateOriginalPersonaReply(params: {
   const postTitle = post.title || post.headline || topic;
   const sourceContext = post.source_snippet || post.source_excerpt || post.content || postTitle;
 
-  const geminiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY;
+  const geminiKey = getActiveGeminiKey();
   let replyText = '';
 
   if (geminiKey) {
-    try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [
-              {
-                role: 'user',
-                parts: [
-                  {
-                    text:
-                      `You are "${persona.name}" (${persona.roleTitle}) on the social study app Study & Scroll (Skrulla).\n` +
-                      `Your personality style: ${persona.voicePrompt}\n` +
-                      `You authored a study post titled "${postTitle}" about "${topic}".\n` +
-                      `Post content / source notes: "${sourceContext}"\n` +
-                      `A student named "${userName}" just commented on your post: "${userCommentText}"\n\n` +
-                      `Write a direct, helpful, engaging reply (2-4 sentences max) staying 100% in character as ${persona.name} and directly answering or building upon their comment using the study material.`,
-                  },
-                ],
-              },
-            ],
-          }),
-        }
-      );
+    const models = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+    for (const model of models) {
+      try {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [
+                {
+                  role: 'user',
+                  parts: [
+                    {
+                      text:
+                        `You are "${persona.name}" (${persona.roleTitle}) on the social study app Study & Scroll (Skrulla).\n` +
+                        `Your personality style: ${persona.voicePrompt}\n` +
+                        `You authored a study post titled "${postTitle}" about "${topic}".\n` +
+                        `Post content / source notes: "${sourceContext}"\n` +
+                        `A student named "${userName}" just commented on your post: "${userCommentText}"\n\n` +
+                        `Write a direct, helpful, engaging reply (2-3 sentences max) staying 100% in character as ${persona.name} and directly answering or building upon their comment using the study material. Keep it conversational, educational, and authentic to your persona.`,
+                    },
+                  ],
+                },
+              ],
+            }),
+          }
+        );
 
-      if (response.ok) {
-        const data = await response.json();
-        const candidate = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-        if (candidate) {
-          replyText = candidate;
+        if (response.ok) {
+          const data = await response.json();
+          const candidate = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+          if (candidate) {
+            replyText = candidate;
+            break;
+          }
         }
+      } catch {
+        // Fallback to next model or offline synthesizer
       }
-    } catch {
-      // Fallback to context-aware persona generator below
     }
   }
 

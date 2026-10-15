@@ -3,12 +3,19 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   X, Camera, Trash2, Check, Lock, KeyRound, Eye, EyeOff,
   User as UserIcon, GraduationCap, Calendar, Award, Globe,
-  Github, Linkedin, Twitter, Instagram, Sparkles, AlertCircle, ShieldCheck
+  Github, Linkedin, Twitter, Instagram, Sparkles, AlertCircle, ShieldCheck,
+  CheckCircle2, RefreshCw, ExternalLink, Cpu, Zap, HelpCircle
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { cleanInput } from '../lib/sanitize';
 import { UserAvatar } from './UserAvatar';
 import type { User, EducationLevel } from '../types';
+import {
+  getActiveGeminiKey,
+  setActiveGeminiKey,
+  testGeminiApiKey,
+  AI_PERSONAS,
+} from '../lib/aiPersonaEngine';
 
 interface Props {
   user: User;
@@ -16,7 +23,7 @@ interface Props {
   onSuccessToast?: (msg: string) => void;
 }
 
-type TabType = 'general' | 'certifications' | 'security';
+type TabType = 'general' | 'certifications' | 'security' | 'ai';
 
 const POPULAR_SCHOOLS = [
   'Harvard University',
@@ -85,6 +92,50 @@ export const ProfileSettingsModal: React.FC<Props> = ({ user, onClose, onSuccess
   const [profileSuccess, setProfileSuccess] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
+
+  // Gemini AI Settings state
+  const [geminiKey, setGeminiKey] = useState<string>(() => getActiveGeminiKey());
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
+  const [isTestingApi, setIsTestingApi] = useState(false);
+  const [testResult, setTestResult] = useState<{
+    success: boolean;
+    message: string;
+    latencyMs?: number;
+    sampleReply?: string;
+    modelUsed?: string;
+  } | null>(null);
+  const [apiSaveStatus, setApiSaveStatus] = useState<string | null>(null);
+
+  const handleTestApi = async () => {
+    setIsTestingApi(true);
+    setTestResult(null);
+    setApiSaveStatus(null);
+    try {
+      const res = await testGeminiApiKey(geminiKey);
+      setTestResult(res);
+    } catch (err: any) {
+      setTestResult({
+        success: false,
+        message: err?.message || 'Network error testing Google Gemini API',
+      });
+    } finally {
+      setIsTestingApi(false);
+    }
+  };
+
+  const handleSaveApiKey = () => {
+    setActiveGeminiKey(geminiKey);
+    setApiSaveStatus('Gemini API key saved! Live AI feeds and persona replies are now active.');
+    onSuccessToast?.('Gemini API key saved successfully!');
+  };
+
+  const handleClearApiKey = () => {
+    setActiveGeminiKey('');
+    setGeminiKey('');
+    setTestResult(null);
+    setApiSaveStatus('API key removed. Reverted to offline curriculum synthesizer.');
+    onSuccessToast?.('Gemini API key removed');
+  };
 
   // Profile Save Mutation
   const profileMutation = useMutation({
@@ -298,11 +349,12 @@ export const ProfileSettingsModal: React.FC<Props> = ({ user, onClose, onSuccess
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex border-b border-slate-100 px-6 gap-2 bg-white shrink-0">
+        <div className="flex border-b border-slate-100 px-4 sm:px-6 gap-1 sm:gap-2 bg-white shrink-0 overflow-x-auto">
           {[
             { id: 'general', label: 'Profile & Academic', icon: UserIcon },
             { id: 'certifications', label: 'Certifications & Socials', icon: Award },
             { id: 'security', label: 'Security & Password', icon: Lock },
+            { id: 'ai', label: 'AI & Gemini API', icon: Sparkles },
           ].map((tab) => {
             const Icon = tab.icon;
             const active = activeTab === tab.id;
@@ -314,14 +366,15 @@ export const ProfileSettingsModal: React.FC<Props> = ({ user, onClose, onSuccess
                   setActiveTab(tab.id as TabType);
                   setProfileError(null);
                   setPasswordError(null);
+                  setApiSaveStatus(null);
                 }}
-                className={`flex items-center gap-2 py-3 px-3 text-xs font-bold border-b-2 transition ${
+                className={`flex items-center gap-1.5 sm:gap-2 py-3 px-2 sm:px-3 text-xs font-bold border-b-2 whitespace-nowrap transition ${
                   active
                     ? 'border-[#6D5CAE] text-[#6D5CAE]'
                     : 'border-transparent text-slate-500 hover:text-slate-800'
                 }`}
               >
-                <Icon className="w-4 h-4" />
+                <Icon className="w-4 h-4 shrink-0" />
                 <span>{tab.label}</span>
               </button>
             );
@@ -819,10 +872,228 @@ export const ProfileSettingsModal: React.FC<Props> = ({ user, onClose, onSuccess
               </button>
             </form>
           )}
+
+          {/* TAB 4: AI & Gemini API Settings */}
+          {activeTab === 'ai' && (
+            <div className="space-y-6 animate-in fade-in duration-150">
+              {/* Status Header Banner */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-50 via-indigo-50 to-pink-50 border border-purple-100 flex items-start gap-3.5">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#6D5CAE] to-pink-500 text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="text-sm font-extrabold text-slate-900">
+                      Google Gemini AI Engine
+                    </h4>
+                    {geminiKey ? (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        Live AI Connected
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                        Offline Fallback Synthesizer
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                    Connecting your Gemini API key activates live generation of unique study cards, 
+                    rich analogies, custom memes, and real-time interactive comments from all 7 AI personas.
+                  </p>
+                </div>
+              </div>
+
+              {/* Success Notification */}
+              {apiSaveStatus && (
+                <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-900 flex items-center gap-2 animate-in fade-in">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{apiSaveStatus}</span>
+                </div>
+              )}
+
+              {/* API Key Input Section */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <KeyRound className="w-3.5 h-3.5 text-[#6D5CAE]" />
+                    <span>Google Gemini API Key</span>
+                  </label>
+                  <a
+                    href="https://aistudio.google.com/app/apikey"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[11px] font-semibold text-[#6D5CAE] hover:underline flex items-center gap-1"
+                  >
+                    <span>Get free API key</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+
+                <div className="relative">
+                  <input
+                    type={showGeminiKey ? 'text' : 'password'}
+                    value={geminiKey}
+                    onChange={(e) => {
+                      setGeminiKey(e.target.value);
+                      setTestResult(null);
+                      setApiSaveStatus(null);
+                    }}
+                    placeholder="AIzaSy..."
+                    className="w-full pr-10 pl-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-[#6D5CAE]/20 focus:border-[#6D5CAE] text-xs font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowGeminiKey(!showGeminiKey)}
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 transition"
+                  >
+                    {showGeminiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-slate-400 leading-normal">
+                  Stored securely in your local browser storage. Never uploaded to third-party databases.
+                </p>
+              </div>
+
+              {/* Action Buttons: Test Connection & Save */}
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleTestApi}
+                  disabled={isTestingApi || !geminiKey.trim()}
+                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold text-xs flex items-center gap-2 transition disabled:opacity-50 shadow-sm"
+                >
+                  {isTestingApi ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Testing API Connection...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="w-3.5 h-3.5" />
+                      <span>Test API Connection</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSaveApiKey}
+                  disabled={isTestingApi}
+                  className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-sm"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Save Key</span>
+                </button>
+
+                {geminiKey && (
+                  <button
+                    type="button"
+                    onClick={handleClearApiKey}
+                    disabled={isTestingApi}
+                    className="px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold text-xs transition ml-auto"
+                  >
+                    Clear Key
+                  </button>
+                )}
+              </div>
+
+              {/* Test Result Feedback Box */}
+              {testResult && (
+                <div
+                  className={`p-4 rounded-2xl border transition animate-in fade-in ${
+                    testResult.success
+                      ? 'bg-emerald-50/70 border-emerald-200 text-emerald-950'
+                      : 'bg-rose-50/70 border-rose-200 text-rose-950'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    {testResult.success ? (
+                      <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <span className="text-xs font-extrabold">
+                          {testResult.success ? 'API Connection Verified!' : 'API Test Failed'}
+                        </span>
+                        {testResult.latencyMs !== undefined && (
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/80 border border-slate-200 text-slate-700">
+                            {testResult.latencyMs}ms · {testResult.modelUsed || 'gemini-2.5-flash'}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs mt-1 text-slate-700 leading-relaxed">
+                        {testResult.message}
+                      </p>
+
+                      {/* Live Persona Quote Bubble on Success */}
+                      {testResult.success && testResult.sampleReply && (
+                        <div className="mt-3 p-3 rounded-xl bg-white border border-emerald-200 shadow-sm flex items-start gap-2.5">
+                          <div className="w-7 h-7 rounded-lg bg-[#FEF08A] text-slate-900 flex items-center justify-center font-bold text-xs shrink-0 shadow-xs">
+                            💀
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <span className="text-[11px] font-bold text-slate-900">Memer Scholar</span>
+                              <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">AI · HUMOR</span>
+                            </div>
+                            <p className="text-xs text-slate-700 italic">
+                              "{testResult.sampleReply}"
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {!testResult.success && (
+                        <p className="text-[11px] text-rose-700 mt-2 bg-white/60 p-2.5 rounded-lg border border-rose-200/60 leading-normal">
+                          💡 <strong>Tip:</strong> Ensure you copied a valid key from Google AI Studio (usually starts with <code className="font-mono font-bold">AIzaSy...</code>). Check that the "Generative Language API" is enabled in your Google Cloud or AI Studio console.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 7 AI Personas Showcase */}
+              <div className="pt-2 border-t border-slate-100">
+                <h5 className="text-xs font-extrabold text-slate-800 mb-2 flex items-center gap-1.5">
+                  <Cpu className="w-3.5 h-3.5 text-[#6D5CAE]" />
+                  <span>Personas Powered by this API Key</span>
+                </h5>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {AI_PERSONAS.map((p) => (
+                    <div
+                      key={p.id}
+                      className="p-2.5 rounded-xl border border-slate-100 bg-slate-50/50 flex items-center gap-2.5"
+                    >
+                      <div
+                        className="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs text-slate-800 shrink-0 shadow-xs"
+                        style={{ backgroundColor: p.avatarBg }}
+                      >
+                        {p.name.charAt(0)}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1">
+                          <p className="text-xs font-bold text-slate-900 truncate">{p.name}</p>
+                          <span className="text-[9px] font-extrabold px-1 rounded bg-purple-100 text-purple-700">
+                            {p.badge}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 truncate">{p.roleTitle}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Modal Footer (for tabs 1 and 2) */}
-        {activeTab !== 'security' && (
+        {activeTab !== 'security' && activeTab !== 'ai' && (
           <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between shrink-0 bg-slate-50/50 rounded-b-3xl">
             <button
               type="button"

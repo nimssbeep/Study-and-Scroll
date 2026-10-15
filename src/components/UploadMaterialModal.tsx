@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { X } from 'lucide-react';
+import { X, Sparkles } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { cleanInput, validateEducationalFile } from '../lib/sanitize';
+import { getActiveGeminiKey } from '../lib/aiPersonaEngine';
 
 interface Props {
   isOpen: boolean;
@@ -22,6 +23,7 @@ export const UploadMaterialModal: React.FC<Props> = ({
   const [uploadSubject, setUploadSubject] = useState(defaultSubject);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const isAiActive = Boolean(getActiveGeminiKey());
 
   const uploadMutation = useMutation({
     mutationFn: async () => {
@@ -64,10 +66,28 @@ export const UploadMaterialModal: React.FC<Props> = ({
             <X className="w-5 h-5 text-slate-400" />
           </button>
         </div>
-        <p className="text-xs text-slate-500 mb-4">
+        <p className="text-xs text-slate-500 mb-3">
           Strictly educational files (.pdf, .txt, .md up to 10 MB). Our Hallucination Shield
           verifies every generated card against your source text.
         </p>
+
+        {/* AI Engine Status Pill */}
+        <div className="mb-4 p-2.5 rounded-xl border flex items-center justify-between text-[11px] font-semibold bg-slate-50 border-slate-100">
+          <div className="flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5 text-[#6D5CAE]" />
+            <span className="text-slate-700">AI Card Generator:</span>
+          </div>
+          {isAiActive ? (
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              Gemini 2.5 Active
+            </span>
+          ) : (
+            <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+              Offline Synthesizer
+            </span>
+          )}
+        </div>
 
         {uploadError && (
           <div className="mb-3 p-3 rounded-xl bg-rose-50 text-xs text-rose-700 border border-rose-200">
